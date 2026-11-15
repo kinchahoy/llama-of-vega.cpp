@@ -1,0 +1,6 @@
+27b exit=0
+fn exit=0
+base 27b PP2048: 703.54 +- 1.28 t/s
+base 27b TG128: 37.35 +- 0.05 t/s
+base fn PP2048: 654.52 +- 0.58 t/s
+base fn TG128: 48.09 +- 0.36 t/s

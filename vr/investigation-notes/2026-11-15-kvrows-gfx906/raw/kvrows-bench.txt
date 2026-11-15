@@ -1,0 +1,6 @@
+27b exit=0
+fn exit=0
+kvrows 27b PP2048: 676.73 +- 2.81 t/s
+kvrows 27b TG128: 32.70 +- 0.23 t/s
+kvrows fn PP2048: 645.85 +- 1.50 t/s
+kvrows fn TG128: 47.35 +- 0.44 t/s

@@ -1,0 +1,14 @@
+base A fresh-chat slot1: prompt 1219 tok 587.9 t/s, gen 256 tok 61.0 t/s, wall 6.4s
+base A fresh-chat-rep slot1: prompt 1220 tok 577.3 t/s, gen 256 tok 62.0 t/s, wall 6.2s
+base B fill slot0: prompt 65547 tok 409.0 t/s, gen 32 tok 37.3 t/s, wall 161.3s
+base C chat-beside-fill slot1: prompt 1219 tok 560.4 t/s, gen 256 tok 59.9 t/s, wall 8.2s
+base C chat-beside-fill-rep slot1: prompt 1219 tok 558.9 t/s, gen 256 tok 54.5 t/s, wall 7.0s
+base D 3users(fill idle) slot1: prompt 1219 tok 176.7 t/s, gen 256 tok 20.9 t/s, wall 19.2s
+base D 3users(fill idle) slot2: prompt 1219 tok 164.5 t/s, gen 256 tok 22.3 t/s, wall 19.0s
+base D 3users(fill idle) slot3: prompt 1219 tok 343.9 t/s, gen 256 tok 21.2 t/s, wall 19.6s
+base D 3users(fill idle) aggregate gen: 39.2 t/s over 19.6s (prefill included)
+base E 4users(slot0 cont) slot0: prompt 65549 tok 370.6 t/s, gen 256 tok 16.5 t/s, wall 193.9s
+base E 4users(slot0 cont) slot1: prompt 1219 tok 97.2 t/s, gen 256 tok 11.2 t/s, wall 194.4s
+base E 4users(slot0 cont) slot2: prompt 1219 tok 60.3 t/s, gen 256 tok 16.2 t/s, wall 195.1s
+base E 4users(slot0 cont) slot3: prompt 1220 tok 181.2 t/s, gen 256 tok 16.1 t/s, wall 195.2s
+base E 4users(slot0 cont) aggregate gen: 5.2 t/s over 195.2s (prefill included)
