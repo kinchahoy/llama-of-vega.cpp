@@ -1541,7 +1541,17 @@ uint32_t llama_kv_cache::get_n_kv_rows(const llama_ubatch & ubatch) const {
 
     // pad like n_kv so that the graph can be reused
     // never 0, it means that kv_rows are not used (f.ex. the sequences have no cells yet in a cache that shares the cells of another one)
-    return std::min(std::max(n_pad_cur, GGML_PAD(n_max, n_pad_cur)), get_size());
+    const uint32_t n_rows = std::min(std::max(n_pad_cur, GGML_PAD(n_max, n_pad_cur)), get_size());
+
+    // the dense path reads each cell once for all slices: rows save compute for prefill,
+    // but decode and draft verify (few tokens per slice) are read-bound, so there rows must read fewer cells
+    const uint32_t n_kv = std::min(std::max(n_pad_cur, GGML_PAD(cells.used_max_p1(), n_pad_cur)), get_size());
+    const bool read_bound = ubatch.n_tokens <= 8*n_slices;
+    if (n_rows >= n_kv || (read_bound && uint64_t(n_slices)*n_rows >= n_kv)) {
+        return 0;
+    }
+
+    return n_rows;
 }
 
 ggml_tensor * llama_kv_cache::get_k(ggml_context * ctx, int32_t il, uint32_t n_kv, const slot_info & sinfo) const {
