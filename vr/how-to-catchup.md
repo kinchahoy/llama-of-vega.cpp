@@ -74,7 +74,7 @@ cmake -S . -B "$CAND" \
   -DCMAKE_CXX_FLAGS="-O3 -Wno-unused-command-line-argument" \
   > "$OUT/configure.log" 2>&1
 # Continue only if configuration succeeds.
-cmake --build "$CAND" --target llama-cli llama-completion llama-server llama-bench vr-test-gfx906-tp -j 8 \
+cmake --build "$CAND" --target llama-cli llama-completion llama-server llama-bench llama-batched-bench vr-test-gfx906-tp -j 8 \
   > "$OUT/build.log" 2>&1
 ```
 
@@ -130,6 +130,28 @@ done
 These are three separate runtime invocations, each capped at 110 seconds plus 5 seconds to terminate; this is not a claim they fit the TP checks' two-minute budget. The benchmarks use warmup and one repetition. Require successful exits and complete JSON for both builds. One pair is a quick regression screen, not repeatability evidence. Add other models or targeted speculative/MoE checks only when the affected feature needs them and the user approves their budget.
 
 Report baseline and candidate PP2048 and TG128 in one table, with tokens/second and percentage change `(candidate / baseline - 1) * 100`. Keep the JSON, stderr, generation text, TP pass/fail and source/build identities in `OUT`. Compare measured results from this session; historical numbers are context, not a matched baseline. Mark skipped checks as not run and performance as not measured if either benchmark fails. Diagnose regressions before tuning; no automatic regression threshold has been agreed.
+
+### Multi-user check (unified KV)
+
+The PP/TG pair above is one sequence. The serving presets run 3-4 users in one unified KV pool, where attention over the shared pool (kv_rows, MTP rollback with several slots, KV cell placement) behaves differently. Run this check before pushing a merge or a change that touches flash attention, the KV cache, memory/ubatch splitting or server slots. It needs `llama-batched-bench` in both builds and about 20 minutes (4 runs; each waits until both GPU junctions are below 60C, since the GPUs throttle under sustained load):
+
+```bash
+vr/scripts/bench_multiuser.sh "$OUT/multiuser" "$BASE" "$CAND"
+# within 3%: repeat with REPS=2 (order A,B,B,A)
+```
+
+It runs `llama-batched-bench -kvu -npp 16384 -ntg 128 -npl 4` (4 sequences x 16K prompts in one pool, then 4-way decode, no draft) on Qwen3.8-27B Q8_0 (`-b/-ub 2048`) and Flash Next UD-IQ3_XXS (`-b 1024 -ub 512`), F16 KV, `-sm tensor`. Report PP and 4-way TG for both models next to the single-sequence table. To isolate kv_rows in one build, pass the same build twice with `ENV_B=LLAMA_KV_ROWS_DISABLE=1`.
+
+Baselines, 2026-11-15, commit 7ddd49693, 2x gfx906, REPS=2 (A = kv_rows on, the default; B = `LLAMA_KV_ROWS_DISABLE=1`):
+
+| Model | kv_rows | PP t/s (4x16K) | 4-way TG t/s |
+| --- | --- | ---: | ---: |
+| Qwen3.8-27B Q8_0 | on | 577.8 / 577.5 | 80.86 / 80.93 |
+| Qwen3.8-27B Q8_0 | off | 462.3 / 462.2 | 81.13 / 81.04 |
+| Flash Next UD-IQ3_XXS | on | 470.5 / 473.1 | 84.17 / 83.90 |
+| Flash Next UD-IQ3_XXS | off | 472.2 / 474.2 | 84.24 / 84.11 |
+
+A drop in 27B PP toward the "off" row means kv_rows stopped engaging (check the server log for "Flash Attention over K/V rows not supported"). For changes to speculative rollback, also run the 4-slot MTP continuation check in [the kv_rows record](investigation-notes/2026-11-15-kvrows-gfx906/README.md) (`raw/v2/ab3.sh`, `srvtest3.py`): it must finish with no "refusing rollback" line.
 
 ## Optional patch kit export
 
