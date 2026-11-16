@@ -1,0 +1,51 @@
+v2-on log: 0.08.244.621 I srv    load_model: initializing, n_slots = 4, n_ctx_slot = 262144, kv_unified = 'true'
+v2-on S1 one-user: prompt 49172 tok 371.2 t/s, gen 384 tok 31.4 t/s
+v2-on S1 text:   The code above is a large excerpt from the **llama.cpp** C++ codebase (the GGML-based LLM inference engine). It covers KV-cache management, graph construction
+v2-on S4 prefill slot0: prompt 49172 tok 358.1 t/s
+v2-on S4 prefill slot1: prompt 49172 tok 354.2 t/s
+v2-on S4 prefill slot2: prompt 49172 tok 352.9 t/s
+v2-on S4 prefill slot3: prompt 49172 tok 352.8 t/s
+v2-on S4 decode slot0: reprocessed 4 tok, gen 384 tok 9.9 t/s
+v2-on S4 decode slot1: reprocessed 4 tok, gen 384 tok 9.1 t/s
+v2-on S4 decode slot2: reprocessed 4 tok, gen 384 tok 9.0 t/s
+v2-on S4 decode slot3: reprocessed 4 tok, gen 384 tok 9.1 t/s
+v2-on S4 decode aggregate: 35.3 t/s over 43.5s
+v2-off log: 0.08.307.579 I srv    load_model: initializing, n_slots = 4, n_ctx_slot = 262144, kv_unified = 'true'
+v2-off S1 one-user: prompt 49172 tok 356.6 t/s, gen 384 tok 31.8 t/s
+v2-off S1 text:   The code above is a large excerpt from the **llama.cpp** C++ codebase (the GGML-based LLM inference engine). It covers KV-cache management, graph construction
+v2-off S4 prefill slot0: prompt 49172 tok 352.7 t/s
+v2-off S4 prefill slot1: prompt 49172 tok 192.9 t/s
+v2-off S4 prefill slot2: prompt 49172 tok 132.2 t/s
+v2-off Traceback (most recent call last):
+v2-off   File "/home/raistlin/.claude/jobs/bee85835/tmp/scripts/srvtest3.py", line 25, in <module>
+v2-off     r = req(i, p, 1); t = r["timings"]
+v2-off   File "/home/raistlin/.claude/jobs/bee85835/tmp/scripts/srvtest3.py", line 18, in req
+v2-off     return post("/completion", {"prompt": prompt, "id_slot": slot, "n_predict": n, "temperature": 0, "top_k": 1, "ignore_eos": True, "cache_prompt": True, "return_tokens": True})
+v2-off   File "/home/raistlin/.claude/jobs/bee85835/tmp/scripts/srvtest3.py", line 6, in post
+v2-off     return json.load(urllib.request.urlopen(r, timeout=to))
+v2-off                      ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+v2-off   File "/usr/lib/python3.14/urllib/request.py", line 187, in urlopen
+v2-off     return opener.open(url, data, timeout)
+v2-off            ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+v2-off   File "/usr/lib/python3.14/urllib/request.py", line 487, in open
+v2-off     response = self._open(req, data)
+v2-off   File "/usr/lib/python3.14/urllib/request.py", line 504, in _open
+v2-off     result = self._call_chain(self.handle_open, protocol, protocol +
+v2-off                               '_open', req)
+v2-off   File "/usr/lib/python3.14/urllib/request.py", line 464, in _call_chain
+v2-off     result = func(*args)
+v2-off   File "/usr/lib/python3.14/urllib/request.py", line 1350, in http_open
+v2-off     return self.do_open(http.client.HTTPConnection, req)
+v2-off            ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+v2-off   File "/usr/lib/python3.14/urllib/request.py", line 1325, in do_open
+v2-off     r = h.getresponse()
+v2-off   File "/usr/lib/python3.14/http/client.py", line 1459, in getresponse
+v2-off     response.begin()
+v2-off     ~~~~~~~~~~~~~~^^
+v2-off   File "/usr/lib/python3.14/http/client.py", line 336, in begin
+v2-off     version, status, reason = self._read_status()
+v2-off                               ~~~~~~~~~~~~~~~~~^^
+v2-off   File "/usr/lib/python3.14/http/client.py", line 305, in _read_status
+v2-off     raise RemoteDisconnected("Remote end closed connection without"
+v2-off                              " response")
+v2-off http.client.RemoteDisconnected: Remote end closed connection without response

@@ -1,33 +1,52 @@
 # Flash Attention over K/V rows (kv_rows) for gfx906
 
-2026-11-15. Commit 518d6233d adds kv_rows reads to the HIP vec and tile FA kernels, so unified-KV servers on gfx906 can attend only to each sequence's own cells. Base: build-catchup-20261113-200420 (same source minus this commit). Harness: raw/ab.sh, raw/srvtest.py.
+2026-11-15. With `--kv-unified` and several slots, each sequence's attention used to scan every cell in the shared pool (dense mask). Upstream's `ggml_flash_attn_ext_rows` (#29510) reads only the sequence's own cells, but ran only on NVIDIA tensor cores, so gfx906 logged "Flash Attention over K/V rows not supported". This change lets the HIP tile kernel read kv_rows, and fixes a multi-slot MTP rollback abort found while testing.
 
-In short: correct, but slower. It does not help a short chat beside a long one, and it makes a long single conversation much slower. Not for deployment as is.
+In short: for 4 users in one unified pool, prompt processing is 54% faster and 4-way decode 16% faster; a new user's prompt no longer slows down as the pool fills. Single-user speed is unchanged within about 1%.
 
-## Correctness
+## Change (41+/17- in 4 files)
 
-test-backend-ops FLASH_ATTN_EXT vs CPU: kv_rows cases (`-p n_cells`) 60/60 on ROCm0 and ROCm1; full FLASH_ATTN_EXT 4382/4382 on ROCm0. Under `-sm tensor` the server no longer logs "Flash Attention over K/V rows not supported"; the Meta mirrored-src[5] assert holds.
+- `fattn-tile.cuh`: K/V tile loads take an optional row list. kv_rows are sorted, so a tile whose rows form one run (`rows[last] - rows[first] == nbatch_fa - 1`) is read directly from `rows[first]`; only mixed tiles gather per row.
+- `fattn.cu`: on AMD, kv_rows uses the tile kernel when K and V are F16; otherwise unsupported (the probe then disables kv_rows and the dense path stays). NVIDIA is unchanged.
+- `ggml-backend-meta.cpp`: assert that kv_rows (src[5]) is mirrored under `-sm tensor`.
+- `llama-memory-hybrid.cpp`: with recurrent rollback (`n_rs_seq > 0`), split ubatches sequentially also for unified KV, as `llama-memory-recurrent.cpp` already does. A non-consecutive ubatch such as seqs {0,1,3} made `find_slot` swap the cell of seq 2, which then lost its rollback planes; the next draft rejection aborted in `common_context_seq_rm` ("refusing rollback seq 2 ... limit=0").
 
-## Performance (2x gfx906, tensor parallel)
+## Results (2x gfx906, -sm tensor, F16 KV, 27B Q8_0)
 
-llama-bench (kv_rows unused there), alternating runs: 27B TG128 base 37.29 / 37.27, kv_rows 37.15 / 37.03. First pass: 27B PP2048 703.5 vs 676.7, FN PP2048 654.5 vs 645.9, FN TG128 48.1 vs 47.35 (the first-pass 27B TG 37.35 vs 32.70 did not reproduce).
+Thermally matched A/B, `llama-batched-bench -kvu -npp 16384 -ntg 128 -npl 4` (4 sequences in one pool, plain decode), same binary with `LLAMA_KV_ROWS_DISABLE=1` for off, order off/on/on/off, each run started below 60C junction:
 
-qwen27b preset (4 slots, 262144 unified, MTP2, 2048/2048), one run each:
-
-| Stage | base | kv_rows |
+| | off | on |
 | --- | ---: | ---: |
-| A short chat TG, fresh | 61.0 / 62.0 | 60.6 / 61.1 |
-| B 64K fill PP | 409.0 | 328.2 |
-| B TG right after 64K fill | 37.3 | 25.0 |
-| C short chat TG beside 64K slot | 59.9 / 54.5 | 56.0 / 52.9 |
-| D 3 users aggregate TG | 39.2 | 38.8 |
-| E 4 users, slot 0 re-prefills 64K, aggregate | 5.2 | 4.2 |
+| PP (t/s) | 366.7 / 365.6 | 565.1 / 565.9 |
+| 4-way TG aggregate (t/s) | 54.4 / 54.3 | 63.0 / 63.1 |
 
-Stage E did not reuse slot 0's cache (full 65549-token re-prefill, likely hybrid-model checkpoint limits), so it mostly measures users stalled behind a prefill.
+qwen27b server preset (4 slots, 262144 unified, MTP2, `--no-cache-idle-slots`), 4 users with 48K prompts prefilled one after another:
 
-## Why, and hints for next time
+| Prefill t/s, users 1-4 | |
+| --- | --- |
+| base build (16:40, cool) | 430 / 277 / 203 / 161 |
+| kv_rows off, same binary (hot) | 353 / 193 / 132 / - |
+| kv_rows on (hot) | 358 / 354 / 353 / 353 |
 
-- The tile kernel now reads each K/V row index from global memory (`rows[i]`) before the row load. On long single sequences this dependent load costs 20% PP and 33% TG at 64K.
-- The base already loses little beside a long neighbour (C vs A: 2-12%): KV_max trims the masked tail, and attention is a small part of a decode step at 64K. The ceiling for this feature on this workload is small.
-- Next try: in the tile kernel, check per FA tile if rows are contiguous (rows[last] - rows[first] == n - 1) and use the plain contiguous load from rows[first]; gather only for mixed tiles. Also stage the tile's row indices in shared memory once. This should make B equal to base; then remeasure C with chats that start after a long fill.
-- A cheaper alternative (no kernel gather): skip fully masked 256-cell blocks in the existing kernels and keep sequences in large chunks in find_slot.
+Single user: server 24K under rocprofv3, off vs on: PP 471.1 vs 468.9, TG 40.9 vs 40.4; flash attention kernel time +1.2%. At 48K (hot GPUs) on vs off: PP 371 vs 357, TG 31.4 vs 31.8.
+
+llama-bench (kv_rows unused there), base `build-catchup-20261113-200420` vs final, alternating base/final/final/base, each run started below 60C, `-r 2`:
+
+| Model | Test | base | final | change |
+| --- | --- | ---: | ---: | ---: |
+| Qwen3.8-27B Q8_0 | PP2048 | 698.2 / 703.6 | 689.4 / 691.3 | -1.5% |
+| Qwen3.8-27B Q8_0 | TG128 | 37.29 / 37.41 | 37.03 / 36.71 | -1.3% |
+| Flash Next UD-IQ3_XXS (q8_0 KV) | PP2048 | 653.6 / 650.1 | 651.6 / 652.2 | 0.0% |
+| Flash Next UD-IQ3_XXS (q8_0 KV) | TG128 | 49.56 / 48.12 | 48.64 / 49.63 | +0.6% |
+
+The 27B cost is the optional row list in the tile loads (repeatable across two sessions). Making the row path a template parameter of the load functions could remove it.
+
+Crash fix: 4-slot MTP2 server, 4 x 16K prefilled, then all 4 continued at once: two runs, 0 rollback refusals, all requests finished (54.3 t/s aggregate). Before the fix this aborted once in three similar runs.
+
+## Notes for later
+
+- The GPUs throttle under sustained load (junction 98-104C, sclk 938 MHz). Runs late in a long session are slower; use matched, cooled, alternating runs for any A/B.
+- Idle-slot caching (`--cache-idle-slots`, default on) moves idle slots to host RAM and clears them from the unified pool when another task starts, so in production the pool mostly holds active users.
+- A quantized KV cache keeps the dense path. A kv_rows path for it would need the vec kernel (the first port's vec gather cost Flash Next q8_0 TG about 4.5% even with kv_rows off) or a tile kernel that reads quantized rows.
+- Attempt 1 (raw/, commit 518d6233d): per-row index loads in every tile; long single sequences lost 20% PP and 33% TG at 64K.
+- Decode with 4 x 48K on the MTP server (35.3 vs 42.3 t/s aggregate) was measured on throttled GPUs against a cool baseline and is not a valid comparison.

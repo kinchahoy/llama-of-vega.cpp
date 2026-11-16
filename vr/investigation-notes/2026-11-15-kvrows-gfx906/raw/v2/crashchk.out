@@ -1,0 +1,27 @@
+fix1 log: 0.08.281.908 I srv    load_model: initializing, n_slots = 4, n_ctx_slot = 262144, kv_unified = 'true'
+fix1 S1 one-user: prompt 16404 tok 510.7 t/s, gen 384 tok 53.5 t/s
+fix1 S1 text:   <think> The user wants me to summarize what the code above does, file by file, in detail. Let me analyze the code carefully.  Looking at the code, I can ident
+fix1 S4 prefill slot0: prompt 16404 tok 513.2 t/s
+fix1 S4 prefill slot1: prompt 16404 tok 501.1 t/s
+fix1 S4 prefill slot2: prompt 16404 tok 492.5 t/s
+fix1 S4 prefill slot3: prompt 16404 tok 487.8 t/s
+fix1 S4 decode slot0: reprocessed 4 tok, gen 384 tok 14.6 t/s
+fix1 S4 decode slot1: reprocessed 4 tok, gen 384 tok 13.9 t/s
+fix1 S4 decode slot2: reprocessed 4 tok, gen 384 tok 14.4 t/s
+fix1 S4 decode slot3: reprocessed 4 tok, gen 384 tok 14.0 t/s
+fix1 S4 decode aggregate: 54.3 t/s over 28.3s
+run1 rollback-refusals: 0
+fix2 log: 0.08.297.433 I srv    load_model: initializing, n_slots = 4, n_ctx_slot = 262144, kv_unified = 'true'
+fix2 S1 one-user: prompt 16404 tok 511.3 t/s, gen 384 tok 53.8 t/s
+fix2 S1 text:   <think> The user wants me to summarize what the code above does, file by file, in detail. Let me analyze the code carefully.  Looking at the code, I can ident
+fix2 S4 prefill slot0: prompt 16404 tok 513.7 t/s
+fix2 S4 prefill slot1: prompt 16404 tok 501.3 t/s
+fix2 S4 prefill slot2: prompt 16404 tok 492.9 t/s
+fix2 S4 prefill slot3: prompt 16404 tok 487.5 t/s
+fix2 S4 decode slot0: reprocessed 4 tok, gen 384 tok 14.6 t/s
+fix2 S4 decode slot1: reprocessed 4 tok, gen 384 tok 13.9 t/s
+fix2 S4 decode slot2: reprocessed 4 tok, gen 384 tok 14.4 t/s
+fix2 S4 decode slot3: reprocessed 4 tok, gen 384 tok 14.0 t/s
+fix2 S4 decode aggregate: 54.3 t/s over 28.3s
+run2 rollback-refusals: 0
+CRASHCHK_DONE

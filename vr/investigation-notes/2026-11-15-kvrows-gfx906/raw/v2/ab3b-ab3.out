@@ -1,0 +1,182 @@
+base-unified log: 0.06.307.585 W resolve_fused_ops: layer 3 is assigned to device Meta() but Flash Attention over K/V rows is assigned to device CPU (usually due to missing support)
+base-unified log: 0.06.307.589 W resolve_fused_ops: Flash Attention over K/V rows not supported, set to disabled
+base-unified log: 0.07.929.075 W resolve_fused_ops: layer 64 is assigned to device Meta() but Flash Attention over K/V rows is assigned to device CPU (usually due to missing support)
+base-unified S1 one-user: prompt 49172 tok 440.2 t/s, gen 384 tok 45.3 t/s
+base-unified S1 text:   The code above is a large excerpt from the **llama.cpp** C++ codebase (the GGML-based LLM inference engine). It covers KV-cache management, graph construction
+base-unified S4 prefill slot0: prompt 49172 tok 429.7 t/s
+base-unified S4 prefill slot1: prompt 49172 tok 276.6 t/s
+base-unified S4 prefill slot2: prompt 49172 tok 203.4 t/s
+base-unified S4 prefill slot3: prompt 49172 tok 160.7 t/s
+base-unified S4 decode slot0: reprocessed 4 tok, gen 384 tok 11.6 t/s
+base-unified S4 decode slot1: reprocessed 4 tok, gen 384 tok 11.3 t/s
+base-unified S4 decode slot2: reprocessed 4 tok, gen 384 tok 10.8 t/s
+base-unified S4 decode slot3: reprocessed 4 tok, gen 384 tok 11.7 t/s
+base-unified S4 decode aggregate: 42.3 t/s over 36.3s
+kvrows2-unified log: 0.08.254.525 I srv    load_model: initializing, n_slots = 4, n_ctx_slot = 262144, kv_unified = 'true'
+kvrows2-unified S1 one-user: prompt 49172 tok 377.1 t/s, gen 384 tok 32.3 t/s
+kvrows2-unified S1 text:   The code above is a large excerpt from the **llama.cpp** C++ codebase (the GGML-based LLM inference engine). It covers KV-cache management, graph construction
+kvrows2-unified S4 prefill slot0: prompt 49172 tok 364.0 t/s
+kvrows2-unified S4 prefill slot1: prompt 49172 tok 356.5 t/s
+kvrows2-unified S4 prefill slot2: prompt 49172 tok 354.5 t/s
+kvrows2-unified S4 prefill slot3: prompt 49172 tok 353.9 t/s
+kvrows2-unified Exception in thread Thread-2 (gen):
+kvrows2-unified Exception in thread Thread-1 (gen):
+kvrows2-unified Exception in thread Thread-3 (gen):
+kvrows2-unified Exception in thread Thread-4 (gen):
+kvrows2-unified Traceback (most recent call last):
+kvrows2-unified Traceback (most recent call last):
+kvrows2-unified Traceback (most recent call last):
+kvrows2-unified   File "/usr/lib/python3.14/threading.py", line 1082, in _bootstrap_inner
+kvrows2-unified     self._context.run(self.run)
+kvrows2-unified     ~~~~~~~~~~~~~~~~~^^^^^^^^^^
+kvrows2-unified   File "/usr/lib/python3.14/threading.py", line 1024, in run
+kvrows2-unified     self._target(*self._args, **self._kwargs)
+kvrows2-unified     ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+kvrows2-unified   File "/home/raistlin/.claude/jobs/bee85835/tmp/scripts/srvtest3.py", line 30, in gen
+kvrows2-unified     r = req(i, prompts[i], 384); t = r["timings"]; out.append((i, t["prompt_n"], t["predicted_n"], t["predicted_per_second"]))
+kvrows2-unified   File "/home/raistlin/.claude/jobs/bee85835/tmp/scripts/srvtest3.py", line 18, in req
+kvrows2-unified     return post("/completion", {"prompt": prompt, "id_slot": slot, "n_predict": n, "temperature": 0, "top_k": 1, "ignore_eos": True, "cache_prompt": True, "return_tokens": True})
+kvrows2-unified   File "/home/raistlin/.claude/jobs/bee85835/tmp/scripts/srvtest3.py", line 6, in post
+kvrows2-unified     return json.load(urllib.request.urlopen(r, timeout=to))
+kvrows2-unified                      ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+kvrows2-unified   File "/usr/lib/python3.14/urllib/request.py", line 187, in urlopen
+kvrows2-unified     return opener.open(url, data, timeout)
+kvrows2-unified            ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+kvrows2-unified   File "/usr/lib/python3.14/urllib/request.py", line 487, in open
+kvrows2-unified     response = self._open(req, data)
+kvrows2-unified   File "/usr/lib/python3.14/urllib/request.py", line 504, in _open
+kvrows2-unified     result = self._call_chain(self.handle_open, protocol, protocol +
+kvrows2-unified                               '_open', req)
+kvrows2-unified   File "/usr/lib/python3.14/threading.py", line 1082, in _bootstrap_inner
+kvrows2-unified     self._context.run(self.run)
+kvrows2-unified     ~~~~~~~~~~~~~~~~~^^^^^^^^^^
+kvrows2-unified Traceback (most recent call last):
+kvrows2-unified   File "/usr/lib/python3.14/urllib/request.py", line 464, in _call_chain
+kvrows2-unified     result = func(*args)
+kvrows2-unified   File "/usr/lib/python3.14/urllib/request.py", line 1350, in http_open
+kvrows2-unified     return self.do_open(http.client.HTTPConnection, req)
+kvrows2-unified            ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+kvrows2-unified   File "/usr/lib/python3.14/threading.py", line 1024, in run
+kvrows2-unified     self._target(*self._args, **self._kwargs)
+kvrows2-unified     ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+kvrows2-unified   File "/usr/lib/python3.14/threading.py", line 1082, in _bootstrap_inner
+kvrows2-unified     self._context.run(self.run)
+kvrows2-unified     ~~~~~~~~~~~~~~~~~^^^^^^^^^^
+kvrows2-unified   File "/usr/lib/python3.14/urllib/request.py", line 1325, in do_open
+kvrows2-unified     r = h.getresponse()
+kvrows2-unified   File "/usr/lib/python3.14/http/client.py", line 1459, in getresponse
+kvrows2-unified     response.begin()
+kvrows2-unified     ~~~~~~~~~~~~~~^^
+kvrows2-unified   File "/usr/lib/python3.14/http/client.py", line 336, in begin
+kvrows2-unified     version, status, reason = self._read_status()
+kvrows2-unified                               ~~~~~~~~~~~~~~~~~^^
+kvrows2-unified   File "/home/raistlin/.claude/jobs/bee85835/tmp/scripts/srvtest3.py", line 30, in gen
+kvrows2-unified     r = req(i, prompts[i], 384); t = r["timings"]; out.append((i, t["prompt_n"], t["predicted_n"], t["predicted_per_second"]))
+kvrows2-unified   File "/usr/lib/python3.14/http/client.py", line 305, in _read_status
+kvrows2-unified     raise RemoteDisconnected("Remote end closed connection without"
+kvrows2-unified                              " response")
+kvrows2-unified   File "/usr/lib/python3.14/threading.py", line 1024, in run
+kvrows2-unified     self._target(*self._args, **self._kwargs)
+kvrows2-unified     ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+kvrows2-unified   File "/home/raistlin/.claude/jobs/bee85835/tmp/scripts/srvtest3.py", line 18, in req
+kvrows2-unified     return post("/completion", {"prompt": prompt, "id_slot": slot, "n_predict": n, "temperature": 0, "top_k": 1, "ignore_eos": True, "cache_prompt": True, "return_tokens": True})
+kvrows2-unified http.client.RemoteDisconnected: Remote end closed connection without response
+kvrows2-unified   File "/home/raistlin/.claude/jobs/bee85835/tmp/scripts/srvtest3.py", line 6, in post
+kvrows2-unified     return json.load(urllib.request.urlopen(r, timeout=to))
+kvrows2-unified                      ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+kvrows2-unified   File "/home/raistlin/.claude/jobs/bee85835/tmp/scripts/srvtest3.py", line 30, in gen
+kvrows2-unified     r = req(i, prompts[i], 384); t = r["timings"]; out.append((i, t["prompt_n"], t["predicted_n"], t["predicted_per_second"]))
+kvrows2-unified   File "/usr/lib/python3.14/urllib/request.py", line 187, in urlopen
+kvrows2-unified     return opener.open(url, data, timeout)
+kvrows2-unified            ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+kvrows2-unified   File "/home/raistlin/.claude/jobs/bee85835/tmp/scripts/srvtest3.py", line 18, in req
+kvrows2-unified     return post("/completion", {"prompt": prompt, "id_slot": slot, "n_predict": n, "temperature": 0, "top_k": 1, "ignore_eos": True, "cache_prompt": True, "return_tokens": True})
+kvrows2-unified   File "/usr/lib/python3.14/urllib/request.py", line 487, in open
+kvrows2-unified     response = self._open(req, data)
+kvrows2-unified   File "/home/raistlin/.claude/jobs/bee85835/tmp/scripts/srvtest3.py", line 6, in post
+kvrows2-unified     return json.load(urllib.request.urlopen(r, timeout=to))
+kvrows2-unified                      ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+kvrows2-unified   File "/usr/lib/python3.14/urllib/request.py", line 504, in _open
+kvrows2-unified     result = self._call_chain(self.handle_open, protocol, protocol +
+kvrows2-unified                               '_open', req)
+kvrows2-unified   File "/usr/lib/python3.14/urllib/request.py", line 187, in urlopen
+kvrows2-unified     return opener.open(url, data, timeout)
+kvrows2-unified            ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+kvrows2-unified   File "/usr/lib/python3.14/urllib/request.py", line 464, in _call_chain
+kvrows2-unified     result = func(*args)
+kvrows2-unified   File "/usr/lib/python3.14/urllib/request.py", line 487, in open
+kvrows2-unified     response = self._open(req, data)
+kvrows2-unified   File "/usr/lib/python3.14/urllib/request.py", line 1350, in http_open
+kvrows2-unified     return self.do_open(http.client.HTTPConnection, req)
+kvrows2-unified            ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+kvrows2-unified   File "/usr/lib/python3.14/urllib/request.py", line 504, in _open
+kvrows2-unified     result = self._call_chain(self.handle_open, protocol, protocol +
+kvrows2-unified                               '_open', req)
+kvrows2-unified   File "/usr/lib/python3.14/urllib/request.py", line 1325, in do_open
+kvrows2-unified     r = h.getresponse()
+kvrows2-unified   File "/usr/lib/python3.14/urllib/request.py", line 464, in _call_chain
+kvrows2-unified     result = func(*args)
+kvrows2-unified   File "/usr/lib/python3.14/http/client.py", line 1459, in getresponse
+kvrows2-unified     response.begin()
+kvrows2-unified     ~~~~~~~~~~~~~~^^
+kvrows2-unified   File "/usr/lib/python3.14/urllib/request.py", line 1350, in http_open
+kvrows2-unified     return self.do_open(http.client.HTTPConnection, req)
+kvrows2-unified            ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+kvrows2-unified   File "/usr/lib/python3.14/http/client.py", line 336, in begin
+kvrows2-unified     version, status, reason = self._read_status()
+kvrows2-unified                               ~~~~~~~~~~~~~~~~~^^
+kvrows2-unified   File "/usr/lib/python3.14/urllib/request.py", line 1325, in do_open
+kvrows2-unified     r = h.getresponse()
+kvrows2-unified   File "/usr/lib/python3.14/http/client.py", line 305, in _read_status
+kvrows2-unified     raise RemoteDisconnected("Remote end closed connection without"
+kvrows2-unified                              " response")
+kvrows2-unified   File "/usr/lib/python3.14/http/client.py", line 1459, in getresponse
+kvrows2-unified     response.begin()
+kvrows2-unified     ~~~~~~~~~~~~~~^^
+kvrows2-unified http.client.RemoteDisconnected: Remote end closed connection without response
+kvrows2-unified   File "/usr/lib/python3.14/http/client.py", line 336, in begin
+kvrows2-unified     version, status, reason = self._read_status()
+kvrows2-unified                               ~~~~~~~~~~~~~~~~~^^
+kvrows2-unified   File "/usr/lib/python3.14/http/client.py", line 305, in _read_status
+kvrows2-unified     raise RemoteDisconnected("Remote end closed connection without"
+kvrows2-unified                              " response")
+kvrows2-unified http.client.RemoteDisconnected: Remote end closed connection without response
+kvrows2-unified   File "/usr/lib/python3.14/threading.py", line 1082, in _bootstrap_inner
+kvrows2-unified     self._context.run(self.run)
+kvrows2-unified     ~~~~~~~~~~~~~~~~~^^^^^^^^^^
+kvrows2-unified   File "/usr/lib/python3.14/threading.py", line 1024, in run
+kvrows2-unified     self._target(*self._args, **self._kwargs)
+kvrows2-unified     ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+kvrows2-unified   File "/home/raistlin/.claude/jobs/bee85835/tmp/scripts/srvtest3.py", line 30, in gen
+kvrows2-unified     r = req(i, prompts[i], 384); t = r["timings"]; out.append((i, t["prompt_n"], t["predicted_n"], t["predicted_per_second"]))
+kvrows2-unified   File "/home/raistlin/.claude/jobs/bee85835/tmp/scripts/srvtest3.py", line 18, in req
+kvrows2-unified     return post("/completion", {"prompt": prompt, "id_slot": slot, "n_predict": n, "temperature": 0, "top_k": 1, "ignore_eos": True, "cache_prompt": True, "return_tokens": True})
+kvrows2-unified   File "/home/raistlin/.claude/jobs/bee85835/tmp/scripts/srvtest3.py", line 6, in post
+kvrows2-unified     return json.load(urllib.request.urlopen(r, timeout=to))
+kvrows2-unified                      ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+kvrows2-unified   File "/usr/lib/python3.14/urllib/request.py", line 187, in urlopen
+kvrows2-unified     return opener.open(url, data, timeout)
+kvrows2-unified            ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+kvrows2-unified   File "/usr/lib/python3.14/urllib/request.py", line 487, in open
+kvrows2-unified     response = self._open(req, data)
+kvrows2-unified   File "/usr/lib/python3.14/urllib/request.py", line 504, in _open
+kvrows2-unified     result = self._call_chain(self.handle_open, protocol, protocol +
+kvrows2-unified                               '_open', req)
+kvrows2-unified   File "/usr/lib/python3.14/urllib/request.py", line 464, in _call_chain
+kvrows2-unified     result = func(*args)
+kvrows2-unified   File "/usr/lib/python3.14/urllib/request.py", line 1350, in http_open
+kvrows2-unified     return self.do_open(http.client.HTTPConnection, req)
+kvrows2-unified            ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+kvrows2-unified   File "/usr/lib/python3.14/urllib/request.py", line 1325, in do_open
+kvrows2-unified     r = h.getresponse()
+kvrows2-unified   File "/usr/lib/python3.14/http/client.py", line 1459, in getresponse
+kvrows2-unified     response.begin()
+kvrows2-unified     ~~~~~~~~~~~~~~^^
+kvrows2-unified   File "/usr/lib/python3.14/http/client.py", line 336, in begin
+kvrows2-unified     version, status, reason = self._read_status()
+kvrows2-unified                               ~~~~~~~~~~~~~~~~~^^
+kvrows2-unified   File "/usr/lib/python3.14/http/client.py", line 305, in _read_status
+kvrows2-unified     raise RemoteDisconnected("Remote end closed connection without"
+kvrows2-unified                              " response")
+kvrows2-unified http.client.RemoteDisconnected: Remote end closed connection without response
+kvrows2-unified S4 decode aggregate: 0.0 t/s over 3.1s

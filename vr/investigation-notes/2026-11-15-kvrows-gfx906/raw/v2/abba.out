@@ -1,0 +1,13 @@
+run1 off start junction=53C
+run1 off exit=0 end junction=83C sclk=(938Mhz) (938Mhz) 
+run1 off | 16384 |    128 |    4 |  66048 |  178.734 |   366.67 |    9.411 |    54.40 |  188.145 |   351.05 |
+run2 on start junction=58C
+run2 on exit=0 end junction=81C sclk=(938Mhz) (938Mhz) 
+run2 on | 16384 |    128 |    4 |  66048 |  115.972 |   565.10 |    8.123 |    63.03 |  124.095 |   532.24 |
+run3 on start junction=58C
+run3 on exit=0 end junction=80C sclk=(938Mhz) (938Mhz) 
+run3 on | 16384 |    128 |    4 |  66048 |  115.813 |   565.88 |    8.119 |    63.06 |  123.932 |   532.94 |
+run4 off start junction=57C
+run4 off exit=0 end junction=83C sclk=(938Mhz) (938Mhz) 
+run4 off | 16384 |    128 |    4 |  66048 |  179.256 |   365.60 |    9.433 |    54.28 |  188.689 |   350.04 |
+ABBA_DONE
