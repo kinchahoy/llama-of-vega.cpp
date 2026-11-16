@@ -605,17 +605,28 @@ static __device__ __forceinline__ void flash_attn_tile_iter(
 
     float KQ_acc[nbatch_fa/(np*warp_size) * cpw] = {0.0f}; // Accumulators for KQ matrix multiplication.
 
+    // kv_rows are sorted: if the tile is one run of cells, read it directly and gather only mixed tiles
+    const int * rows    = KV_rows;
+    int         k_row_0 = k_VKQ_0;
+    if (KV_rows) {
+        const int r0 = KV_rows[k_VKQ_0];
+        if (r0 >= 0 && KV_rows[k_VKQ_0 + nbatch_fa - 1] - r0 == nbatch_fa - 1) {
+            rows    = nullptr;
+            k_row_0 = r0;
+        }
+    }
+
     // KQ = K @ Q matrix multiplication:
     constexpr int nbatch_K_last = DKQ % nbatch_K;
 #pragma unroll
     for (int k_KQ_0 = 0; k_KQ_0 < DKQ - nbatch_K_last; k_KQ_0 += nbatch_K) {
         flash_attn_tile_iter_KQ<warp_size, nwarps, ncols1, ncols2, DKQ, nbatch_fa, nbatch_K, use_logit_softcap, oob_check>(
-            Q_tmp, K_h2, KV_rows, KV_tmp, stride_K2, k_VKQ_0, k_VKQ_sup, k_KQ_0, KQ_acc);
+            Q_tmp, K_h2, rows, KV_tmp, stride_K2, k_row_0, k_VKQ_sup, k_KQ_0, KQ_acc);
     }
     if (nbatch_K_last > 0) {
         constexpr int k_KQ_0 = DKQ - nbatch_K_last;
         flash_attn_tile_iter_KQ<warp_size, nwarps, ncols1, ncols2, DKQ, nbatch_fa, nbatch_K_last, use_logit_softcap, oob_check>(
-            Q_tmp, K_h2, KV_rows, KV_tmp, stride_K2, k_VKQ_0, k_VKQ_sup, k_KQ_0, KQ_acc);
+            Q_tmp, K_h2, rows, KV_tmp, stride_K2, k_row_0, k_VKQ_sup, k_KQ_0, KQ_acc);
     }
 
     // Apply logit softcap + mask, update KQ_max:
@@ -721,7 +732,7 @@ static __device__ __forceinline__ void flash_attn_tile_iter(
 #pragma unroll
     for (int k0 = 0; k0 < nbatch_fa; k0 += nbatch_V) {
         flash_attn_tile_load_tile<warp_size, nwarps, nbatch_V, DV, 0, oob_check>
-            (V_h2 + (KV_rows ? 0 : int64_t(k_VKQ_0 + k0)*stride_V2), KV_tmp, stride_V2, k_VKQ_sup - k0, KV_rows ? KV_rows + k_VKQ_0 + k0 : nullptr);
+            (V_h2 + (rows ? 0 : int64_t(k_row_0 + k0)*stride_V2), KV_tmp, stride_V2, k_VKQ_sup - k0, rows ? rows + k_VKQ_0 + k0 : nullptr);
         __syncthreads();
 
 #ifdef FAST_FP16_AVAILABLE
