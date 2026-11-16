@@ -1,0 +1,28 @@
+v6 log: 0.08.738.260 I srv    load_model: initializing, n_slots = 4, n_ctx_slot = 262144, kv_unified = 'true'
+v6 S1 one-user: prompt 16404 tok 553.9 t/s, gen 384 tok 59.8 t/s
+v6 S1 text:   <think> The user wants me to summarize what the code above does, file by file, in detail. Let me analyze the code carefully.  Looking at the code, I can ident
+v6 S4 prefill slot0: prompt 16404 tok 554.1 t/s
+v6 S4 prefill slot1: prompt 16404 tok 503.3 t/s
+v6 S4 prefill slot2: prompt 16404 tok 494.2 t/s
+v6 S4 prefill slot3: prompt 16404 tok 493.8 t/s
+v6 S4 decode slot0: reprocessed 4 tok, gen 384 tok 15.8 t/s
+v6 S4 decode slot1: reprocessed 4 tok, gen 384 tok 16.3 t/s
+v6 S4 decode slot2: reprocessed 4 tok, gen 384 tok 16.3 t/s
+v6 S4 decode slot3: reprocessed 4 tok, gen 384 tok 15.7 t/s
+v6 S4 decode aggregate: 60.9 t/s over 25.2s
+v6 rollback-refusals: 0
+SRV_DONE
+1 27b A rc=0 start=56C end=80C | 16384 |    128 |    4 |  66048 |  113.416 |   577.84 |    6.332 |    80.86 |  119.748 |   551.56 |
+2 27b B rc=0 start=57C end=80C | 16384 |    128 |    4 |  66048 |  141.762 |   462.30 |    6.311 |    81.13 |  148.073 |   446.05 |
+3 27b B rc=0 start=57C end=80C | 16384 |    128 |    4 |  66048 |  141.802 |   462.16 |    6.318 |    81.04 |  148.120 |   445.91 |
+4 27b A rc=0 start=57C end=80C | 16384 |    128 |    4 |  66048 |  113.472 |   577.55 |    6.327 |    80.93 |  119.799 |   551.32 |
+5 fn A rc=0 start=57C end=77C | 16384 |    128 |    4 |  66048 |  139.299 |   470.47 |    6.083 |    84.17 |  145.382 |   454.31 |
+6 fn B rc=0 start=56C end=77C | 16384 |    128 |    4 |  66048 |  138.775 |   472.25 |    6.078 |    84.24 |  144.853 |   455.97 |
+7 fn B rc=0 start=56C end=77C | 16384 |    128 |    4 |  66048 |  138.192 |   474.24 |    6.087 |    84.11 |  144.279 |   457.78 |
+8 fn A rc=0 start=56C end=77C | 16384 |    128 |    4 |  66048 |  138.519 |   473.12 |    6.102 |    83.90 |  144.622 |   456.70 |
+model side  PP t/s (4x16K)       TG t/s (4-way aggregate)
+27b   A     577.8 / 577.5          80.86 / 80.93
+27b   B     462.3 / 462.2          81.13 / 81.04
+fn    A     470.5 / 473.1          84.17 / 83.90
+fn    B     472.2 / 474.2          84.24 / 84.11
+MULTI_DONE

@@ -1,0 +1,9 @@
+base pass done
+final pass done
+final pass done
+base pass done
+27b PP2048 base ['703.32', '700.63'] final ['699.71', '699.05']
+27b TG128 base ['37.29', '37.19'] final ['37.17', '37.27']
+fn PP2048 base ['654.02', '655.56'] final ['652.55', '651.63']
+fn TG128 base ['48.35', '49.09'] final ['48.92', '49.09']
+FINAL_DONE
