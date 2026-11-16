@@ -87,7 +87,10 @@ llama_memory_context_ptr llama_memory_hybrid::init_batch(llama_batch_allocr & ba
                 //   so that the rollback snapshots remain valid
                 const uint32_t n_rs_seq = mem_recr->n_rs_seq;
 
-                ubatch = balloc.split_equal(n_ubatch, !unified, n_rs_seq > 0 ? n_rs_seq + 1 : 0);
+                // with rollback, keep seq ids consecutive so find_slot does not swap the cell of a seq outside the ubatch (it loses its rollback planes)
+                const bool sequential = !unified || n_rs_seq > 0;
+
+                ubatch = balloc.split_equal(n_ubatch, sequential, n_rs_seq > 0 ? n_rs_seq + 1 : 0);
             }
 
             if (ubatch.n_tokens == 0) {
