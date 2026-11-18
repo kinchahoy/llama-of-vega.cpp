@@ -234,8 +234,8 @@ static __device__ __forceinline__ void dsv4_hc_quant8(const float (&z)[8], float
     for (int k = 0; k < 8; ++k) {
         amax = fmaxf(amax, fabsf(z[k]));
     }
-    amax = fmaxf(amax, __shfl_xor_sync(0xffffffff, amax, 1, 4));
-    amax = fmaxf(amax, __shfl_xor_sync(0xffffffff, amax, 2, 4));
+    amax = fmaxf(amax, ggml_cuda_shfl_xor(amax, 1, 4));
+    amax = fmaxf(amax, ggml_cuda_shfl_xor(amax, 2, 4));
     dx = amax/127.0f;
     const float inv = amax > 0.0f ? 127.0f/amax : 0.0f;
 #pragma unroll
@@ -594,7 +594,7 @@ static __global__ void __launch_bounds__(DSV4_HC_MIX_UP_BLK) dsv4_hc_mix_up_f32(
         for (int hp = 0; hp < DSV4_HC/G; ++hp) {
 #pragma unroll
             for (int gi = 0; gi < G; ++gi) {
-                tt[hp*G + gi] = __shfl_sync(0xffffffff, term[hp][t], gi*16, WS);
+                tt[hp*G + gi] = ggml_cuda_shfl(term[hp][t], gi*16, WS);
             }
         }
         if (lane == 0) {
