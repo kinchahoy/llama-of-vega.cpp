@@ -3776,6 +3776,10 @@ static bool ggml_cuda_graph_check_compability(ggml_cgraph * cgraph) {
 }
 
 static const void * ggml_cuda_graph_get_key(ggml_cgraph * cgraph) {
+    if (cgraph->n_nodes == 0) {
+        return nullptr;
+    }
+
     // Mix the shape into the key: alternating draft/verify shapes in spec
     // decode share nodes[0] via arena reuse and would thrash one cache entry
     // through warmup-reset/re-capture/re-instantiate cycles.
