@@ -467,7 +467,7 @@ void ggml_cuda_mul_mat_q(
         const float * src1_chunk = src1_d + token*src_s12;
         float * dst_chunk = dst_d + token*s2;
 
-        ggml_cuda_launch_mm_ids_helper(ids_chunk, ids_src1.get(), ids_dst.get(), tile_spec.get(),
+        ggml_cuda_launch_mm_ids_helper(ctx.pool(), ids_chunk, ids_src1.get(), ids_dst.get(), tile_spec.get(),
             ne02, iter_ne12, n_expert_used, ne11, J_best, ids_s1, src1_ids_s1,
             /*write_inverse =*/ dedup_bcast, stream);
         CUDA_CHECK(cudaGetLastError());
