@@ -60,7 +60,7 @@ Twenty CPU threads are the requested comparison setting for this host, not a cla
 
 For single-request MTP, append `--spec-type draft-mtp --spec-draft-n-max 2 --spec-draft-backend-sampling`. This is a useful starting point, not a universal winner; concurrency and prompt length change the result. Use the same model/GPU flags with `llama-server` for serving, setting host and port explicitly.
 
-Keep HIP graphs enabled and RCCL off for the current mixed PCIe-lane topology. HIP uses the upstream host-staged AllReduce path plus the local graph-safe counters and slab/duplex overlap hooks; the old `GGML_CUDA_TP_OVERLAP` switch is removed. The peer-write AllReduce is opt-in with `GGML_CUDA_PEER_AR=1`. Most local optimizations are enabled by default; historical environment sweeps are in the archive. Multi-stage TP (`-tps`) is removed; see [the rebuild changes](IMPROVEMENTS.md#2026-10-29-rebuild-removed-and-changed).
+Keep HIP graphs enabled and RCCL off for the current mixed PCIe-lane topology. HIP uses the upstream host-staged AllReduce path plus the local graph-safe counters and slab/duplex overlap hooks; the old `GGML_CUDA_TP_OVERLAP` switch is removed. The opt-in peer-write AllReduce is archived in [old-ignore/2026-11-21/peer-ar](old-ignore/2026-11-21/peer-ar/README.md). Most local optimizations are enabled by default; historical environment sweeps are in the archive. Multi-stage TP (`-tps`) is removed; see [the rebuild changes](IMPROVEMENTS.md#2026-10-29-rebuild-removed-and-changed).
 
 ## Validation
 

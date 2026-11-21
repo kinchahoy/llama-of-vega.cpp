@@ -77,7 +77,7 @@ Update a row when its dispatch, dependencies or validation needs change. Record 
 
 The [repack README](../ggml/src/ggml-cuda/q8_repack/README.md) explains its layout and integration. Preserve upload, allocation, dispatch, and consumers together; canonical kernels cannot read repacked weights. For HIP AllReduce, keep the first `#if !defined(GGML_USE_MUSA)` branch in `allreduce.cu` available to HIP. The normal configuration must not depend on an environment switch.
 
-Upstream already provides the basic HIP host-staged AllReduce. The local delta adds graph-replay device counters, separate H2D/D2H streams, prefill slab overlap, prepare/launch scheduler hooks, and a separate opt-in peer-write/two-shot transport (`tp-allreduce.cu`, `GGML_CUDA_PEER_AR=1`). The unreachable old HIP overlap-only `#elif` has been removed from `allreduce.cu`; do not restore that duplicate implementation. BF16 transport and its threshold already exist in the upstream base; grouped MoE adds no new precision reduction.
+Upstream already provides the basic HIP host-staged AllReduce. The local delta adds graph-replay device counters, separate H2D/D2H streams, prefill slab overlap, prepare/launch scheduler hooks. The opt-in peer-write/two-shot transport (`tp-allreduce.cu`, `GGML_CUDA_PEER_AR=1`) is archived in [old-ignore/2026-11-21/peer-ar](old-ignore/2026-11-21/peer-ar/README.md). The unreachable old HIP overlap-only `#elif` has been removed from `allreduce.cu`; do not restore that duplicate implementation. BF16 transport and its threshold already exist in the upstream base; grouped MoE adds no new precision reduction.
 
 Keep the gfx906 MMQ launch traversal aligned with the gfx906 kernel's row-first indexing. The first port of upstream `418f905a4` changed the block-axis order and showed a large PP drop in one matched Flash Next run. Restoring the gfx906 traversal removed that identified porting regression; that correction is in the active patch set. The initial negative result remains archived and does not measure the corrected tree.
 
@@ -108,7 +108,7 @@ Fixed:
 - B1: gguf-split split a string literal at a newline.
 
 Environment knobs:
-- Peer-write AllReduce is now opt-in with `GGML_CUDA_PEER_AR=1`. Before, it turned on by itself when peer access was reported.
+- Peer-write AllReduce was made opt-in with `GGML_CUDA_PEER_AR=1`, then archived on 2026-11-21 (see the merge maintenance index).
 - Removed with the stages: `LLAMA_STAGE_LOCAL_MIRROR`, `GGML_META_SPLIT_CARRY_STAGE`, `GGML_META_XFER_RCCL`, `GGML_META_MOE_XFER_RCCL_THRESHOLD`, `GGML_META_NO_DEDICATED_CPY`, `GGML_META_XFER_ROWS`, `GGML_META_LAYER_SEAM_COST`.
 - Removed with DeepSeek V4/V4.1: `LLAMA_MLA_TP` and the fork `LLAMA_DSV41_*` knobs (they were inert). Upstream `LLAMA_DSV41_SPARSE` remains.
 - Removed in cleanup (default path unchanged): `GGML_CUDA_TP_OVERLAP`, `GGML_SCHED_TIMING`, `GGML_SCHED_TIMING_INTERVAL`, `GGML_SCHED_TRACE_INPUTS`, `GGML_SCHED_REBIND_EVENT_TRACE`, `GGML_SCHED_SYNC_NONGRAPH`, `GGML_ALLOC_REALLOC_TRACE`, `GGML_CUDA_GATE_DEBUG`, `GGML_CUDA_REPACK_MOE_FUSION_STATS`, `GGML_CUDA_OP_SYNC`, `GGML_RP_NC_FUSION`, `GGML_RP_NC_RPL`, `GGML_RP_NC_23`, `GGML_RP_GENERIC_MMV`, `LLAMA_REUSE_NO_DRAIN`, `LLAMA_NO_FUSED_LID`.

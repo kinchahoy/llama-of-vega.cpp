@@ -92,7 +92,6 @@ static bool ggml_cuda_repack_fusion_glu_ok(const ggml_tensor * glu) {
 #include "ggml-cuda/tri.cuh"
 #include "ggml-cuda/cumsum.cuh"
 #include "ggml-cuda/fill.cuh"
-#include "ggml-cuda/tp-allreduce.cuh"
 #include "ggml-cuda/lightning-indexer.cuh"
 #include "ggml-cuda/top-k-mask.cuh"
 #include "ggml.h"
@@ -1438,14 +1437,6 @@ ggml_backend_buffer_type_t ggml_backend_cuda_buffer_type(int device) {
 struct ggml_backend_cuda_comm_context {
     using try_allreduce_fn = bool(*)(ggml_backend_cuda_comm_context *, struct ggml_tensor **);
 
-    // Plan for the split custom-AR path. Filled by allreduce_prepare and
-    // consumed by allreduce_launch_rank. One per communicator is enough: the
-    // meta backend runs at most one AllReduce at a time, and every
-    // rank's launch happens before the next prepare on the same context.
-    ggml_cuda_tp::CustomARPlan ar_plan;
-    // True when the current plan is the host-staged internal pipeline instead of ar_plan.
-    bool ar_plan_internal = false;
-
     std::vector<ggml_backend_t> backends;
     std::vector<int>            dev_ids;
 
@@ -1474,14 +1465,7 @@ struct ggml_backend_cuda_comm_context {
     std::vector<ncclComm_t>     comms;
 #endif // GGML_USE_NCCL
 
-    // Custom PCIe-friendly AllReduce (GPU-barrier kernel, no NCCL proxy threads).
-    // Opt-in: off unless GGML_CUDA_PEER_AR=1 (see tp_custom_ar_init). GGML_ENABLE_CUSTOM_AR=0 also turns it off.
-    // Without a peer-write coherent fabric, NCCL builds defer to the regular AllReduce.
-    ggml_cuda_tp::CustomARContext custom_ar;
-    bool use_custom_ar = false;
-
     ~ggml_backend_cuda_comm_context() {
-        ggml_cuda_tp::tp_custom_ar_destroy(&custom_ar);
 #ifdef GGML_USE_NCCL
         for (ncclComm_t comm : comms) {
             NCCL_CHECK(ncclCommDestroy(comm));
@@ -1490,116 +1474,6 @@ struct ggml_backend_cuda_comm_context {
         ggml_cuda_ar_pipeline_free(ar_pipeline);
     }
 };
-
-// Shared setup + eligibility for the custom AR path. On success the per-rank
-// kernels have NOT been issued yet - comm_ctx->ar_plan describes them.
-// ar_plan.nranks == 0 means "eligible, but there is nothing to launch".
-static bool ggml_backend_cuda_comm_allreduce_custom_prepare(
-        ggml_backend_cuda_comm_context * comm_ctx, struct ggml_tensor ** tensors) {
-    comm_ctx->ar_plan.nranks = 0;
-    if (!comm_ctx->use_custom_ar) {
-        return false;
-    }
-
-    const int64_t ne = ggml_nelements(tensors[0]);
-    // FIXME the input of llm_graph_context::build_in_out_ids can produce a tensor with 0 elements if n_outputs == 0
-    // This then causes a crash in this function
-    if (ne == 0) {
-        return true;
-    }
-
-    if (tensors[0]->type != GGML_TYPE_F32) {
-        return false;
-    }
-
-    const size_t n_backends = comm_ctx->backends.size();
-
-    for (size_t i = 0; i < n_backends; ++i) {
-        GGML_ASSERT(tensors[i] != nullptr);
-        GGML_ASSERT(ggml_nelements(tensors[i]) == ne);
-        GGML_ASSERT(tensors[i]->type == GGML_TYPE_F32);
-        GGML_ASSERT(ggml_is_contiguously_allocated(tensors[i]));
-    }
-
-    // Custom AR path: supported for contiguous F32 tensors. On hardware with
-    // coherent peer writes it routes small (TG-size) messages to the broadcast
-    // kernel where the GPU-barrier path wins on launch overhead. Large
-    // (PP-size) messages fall through to NCCL because the twoshot F32 kernel
-    // pushes 2x the PCIe bytes of NCCL's BF16 ring and consistently loses
-    // 5-10% PP across tested models on PCIe 3.0.
-    // GGML_TP_AR_NO_GATE=1 disables the size gate as a diagnostic/dev path.
-    // If peer-write broadcast is unavailable and NCCL/RCCL is available, fall
-    // through to the backend allreduce unless one-shot was explicitly forced.
-#ifdef GGML_USE_NCCL
-    static const bool s_gate_on = []{
-        const char * e = getenv("GGML_TP_AR_NO_GATE");
-        return !(e && e[0] != '\0' && e[0] != '0');
-    }();
-    static const bool s_force_oneshot = []{
-        const char * e = getenv("GGML_TP_AR_ONESHOT");
-        return e && e[0] != '\0' && e[0] != '0';
-    }();
-    if (!comm_ctx->custom_ar.broadcast_ok && !s_force_oneshot) {
-        return false;
-    }
-    bool eligible = true;
-    if (s_gate_on) {
-        // Small-vs-large threshold from upstream's NCCL heuristic. Below this,
-        // broadcast wins on TG by 14-30%; above this, NCCL BF16 ring is faster.
-        eligible = (n_backends <= 2 && ne < 32768) ||
-                   (n_backends == 3 && ne < 131072) ||
-                   (n_backends >= 4 && ne < 262144);
-    }
-    if (!eligible) {
-        return false;
-    }
-#endif // GGML_USE_NCCL
-
-    // Both AR kernels read through per-rank fine-grained staging (allocated
-    // inside tp_custom_ar_allreduce) and write the reduced result straight
-    // into each rank's tensor->data. There is no intermediate output buffer
-    // because the reads and writes do not alias: reads go via staging and the
-    // write is the final result for this rank. Passing input_ptrs == output_ptrs
-    // saves one D2D memcpy per rank per AR.
-    float *      input_ptrs[GGML_CUDA_MAX_DEVICES];
-    float *      output_ptrs[GGML_CUDA_MAX_DEVICES];
-    cudaStream_t streams[GGML_CUDA_MAX_DEVICES];
-    for (size_t i = 0; i < n_backends; ++i) {
-        ggml_backend_cuda_context * cuda_ctx = (ggml_backend_cuda_context *) comm_ctx->backends[i]->context;
-        input_ptrs[i]  = (float *) tensors[i]->data;
-        output_ptrs[i] = (float *) tensors[i]->data;
-        streams[i]     = cuda_ctx->stream();
-    }
-
-    if (!ggml_cuda_tp::tp_custom_ar_prepare(
-            &comm_ctx->custom_ar, input_ptrs, output_ptrs, ne, (int)n_backends, streams,
-            &comm_ctx->ar_plan)) {
-        // Avoid retrying an allocation that already failed under a stable
-        // model/context footprint. The configured regular path remains valid.
-        comm_ctx->use_custom_ar = false;
-        return false;
-    }
-
-    // Deferred to launch_rank so it is ordered after that lane's subgraph even
-    // when prepare runs ahead of the lanes (fused dispatch).
-    for (size_t i = 0; i < n_backends; ++i) {
-        comm_ctx->ar_plan.zero_ptr[i] =
-            ((tensors[i]->flags & GGML_TENSOR_FLAG_COMPUTE) == 0) ? tensors[i]->data : nullptr;
-    }
-    comm_ctx->ar_plan.zero_bytes = ggml_nbytes(tensors[0]);
-    return true;
-}
-
-static bool ggml_backend_cuda_comm_allreduce_custom(
-        ggml_backend_cuda_comm_context * comm_ctx, struct ggml_tensor ** tensors) {
-    if (!ggml_backend_cuda_comm_allreduce_custom_prepare(comm_ctx, tensors)) {
-        return false;
-    }
-    for (int rank = 0; rank < comm_ctx->ar_plan.nranks; rank++) {
-        ggml_cuda_tp::tp_custom_ar_launch_rank(&comm_ctx->ar_plan, rank);
-    }
-    return true;
-}
 
 // Split entry points for the meta backend's fused lane dispatch.
 //   returns < 0 : not eligible, caller must use ggml_backend_comm_allreduce_tensor
@@ -1612,22 +1486,10 @@ static int ggml_backend_cuda_comm_allreduce_prepare(void * comm_ctx_v, struct gg
         return -1;
     }
     auto * comm_ctx = static_cast<ggml_backend_cuda_comm_context *>(comm_ctx_v);
-    comm_ctx->ar_plan_internal = false;
-    // One-shot stages the input with an async copy issued during prepare, which
-    // the fused caller runs before the lanes enqueue their subgraphs - that copy
-    // would then read data the subgraph has not written yet. Only the
-    // peer-write kernels (broadcast/twoshot) stage inside the kernel itself.
-    if (ggml_backend_cuda_comm_allreduce_custom_prepare(comm_ctx, tensors)) {
-        if (comm_ctx->ar_plan.nranks > 0 && !comm_ctx->ar_plan.broadcast) {
-            return -1;
-        }
-        return comm_ctx->ar_plan.nranks;
-    }
-    // Without peer writes, the host-staged chunked kernel also stages inside the kernel.
+    // The host-staged chunked kernel stages inside the kernel, so it is safe to prepare ahead of the lanes.
     if (comm_ctx->ar_pipeline != nullptr && comm_ctx->try_allreduce == ggml_backend_cuda_comm_try_allreduce_internal) {
         const int nr = ggml_cuda_ar_prepare(comm_ctx->ar_pipeline, comm_ctx->backends.data(), tensors);
         if (nr > 0) {
-            comm_ctx->ar_plan_internal = true;
             return nr;
         }
     }
@@ -1636,12 +1498,7 @@ static int ggml_backend_cuda_comm_allreduce_prepare(void * comm_ctx_v, struct gg
 
 static void ggml_backend_cuda_comm_allreduce_launch_rank(void * comm_ctx_v, int rank) {
     auto * comm_ctx = static_cast<ggml_backend_cuda_comm_context *>(comm_ctx_v);
-    if (comm_ctx->ar_plan_internal) {
-        ggml_cuda_ar_launch_rank(comm_ctx->ar_pipeline, rank);
-        return;
-    }
-    ggml_cuda_tp::tp_custom_ar_launch_rank(&comm_ctx->ar_plan, rank);
-}
+    ggml_cuda_ar_launch_rank(comm_ctx->ar_pipeline, rank);
 
 #ifdef GGML_USE_NCCL
 // AllReduce via NCCL. Reduces as FP32 for small tensors and BF16 for large
@@ -1876,16 +1733,6 @@ static void * ggml_backend_cuda_comm_init(ggml_backend_t * backends, size_t n_ba
         ret->dev_ids.push_back(static_cast<ggml_backend_cuda_context *>(backends[i]->context)->device);
     }
 
-    // Custom AR can coexist with NCCL/internal. The top-level dispatch tries it
-    // first for eligible F32 tensors when GGML_CUDA_PEER_AR=1 and GGML_ENABLE_CUSTOM_AR!=0.
-    const char * env_custom_ar = getenv("GGML_ENABLE_CUSTOM_AR");
-    const bool enabled_via_env = env_custom_ar == nullptr || env_custom_ar[0] == '\0' || env_custom_ar[0] != '0';
-    const bool supported_nranks = (n_backends >= 2 && n_backends <= ggml_cuda_tp::kMaxRanks);
-    if (enabled_via_env && supported_nranks) {
-        ggml_cuda_tp::tp_custom_ar_init(&ret->custom_ar, (int)n_backends, ret->dev_ids.data());
-        ret->use_custom_ar = ret->custom_ar.initialized;
-    }
-
     const char * env = getenv("GGML_CUDA_ALLREDUCE");
     if (!env) {
         // Platform default: Linux uses NCCL, otherwise (generally Windows) internal
@@ -1995,16 +1842,12 @@ static void * ggml_backend_cuda_comm_init_rank(ggml_backend_t backend, int rank,
 }
 #endif // GGML_USE_NCCL
 
-// Top-level dispatch -- tries optional custom AR, then calls the function pointer
-// chosen by comm_init. Returns false to let the meta-backend's butterfly run.
+// Top-level dispatch -- calls the function pointer chosen by comm_init. Returns false to let the meta-backend's butterfly run.
 static bool ggml_backend_cuda_comm_allreduce_tensor(void * comm_ctx_v, struct ggml_tensor ** tensors) {
     if (comm_ctx_v == nullptr) {
         return false;
     }
     auto * comm_ctx = static_cast<ggml_backend_cuda_comm_context *>(comm_ctx_v);
-    if (ggml_backend_cuda_comm_allreduce_custom(comm_ctx, tensors)) {
-        return true;
-    }
     return comm_ctx->try_allreduce(comm_ctx, tensors);
 }
 

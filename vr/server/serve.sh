@@ -8,7 +8,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$HERE/../.." && pwd)
 BUILD=${BUILD:-$REPO_ROOT/build-current}
 source $THEROCK_ENV
-unset GGML_CUDA_PEER_AR GGML_CUDA_TP_OVERLAP GGML_CUDA_FLASHNEXT_MOE
+unset GGML_CUDA_TP_OVERLAP GGML_CUDA_FLASHNEXT_MOE
 exec "$BUILD/bin/llama-server" \
   --models-preset "$HERE/models.ini" --models-max 1 \
   --host "${HOST:-0.0.0.0}" --port "${PORT:-8080}" "$@"
