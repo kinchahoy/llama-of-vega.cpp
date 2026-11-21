@@ -2722,15 +2722,13 @@ struct ggml_backend_meta_context {
         }
         name += ")";
 
-        // One comm_ctx over all lanes. GGML_META_NO_COMM=1 forces the generic butterfly fallback (debug aid).
+        // One comm_ctx over all lanes.
         ggml_backend_reg_t simple_reg = ggml_backend_dev_backend_reg(
             ggml_backend_get_device(simple_backends[0]));
         ggml_backend_comm_init_t comm_init = (ggml_backend_comm_init_t)
             ggml_backend_reg_get_proc_address(simple_reg, "ggml_backend_comm_init");
 
-        const char * env_no_comm = getenv("GGML_META_NO_COMM");
-        const bool   no_comm     = copy_only || (env_no_comm && atoi(env_no_comm) != 0);
-        if (n_devs > 1 && !no_comm && comm_init != nullptr) {
+        if (n_devs > 1 && !copy_only && comm_init != nullptr) {
             comm_ctx = comm_init(simple_backends.data(), n_devs);
         }
         if (comm_ctx != nullptr) {
@@ -3327,11 +3325,7 @@ static enum ggml_status ggml_backend_meta_graph_compute(ggml_backend_t backend, 
                 // mirrored score compute is not bitwise identical (per-lane reduce
                 // ordering), and once the selection is live a near-tie flip gives
                 // every lane a different mask. Close the subgraph and broadcast the
-                // first lane's result. GGML_META_TOPK_BCAST=0 disables.
-                static const bool topk_bcast = []() {
-                    const char * env = getenv("GGML_META_TOPK_BCAST");
-                    return env == nullptr || atoi(env) != 0;
-                }();
+                // first lane's result.
                 // A TOP_K whose scores came from the fused lightning indexer
                 // needs no broadcast: the scores are AllReduce outputs, which
                 // are bit-identical on every lane by construction, so the
@@ -3350,7 +3344,7 @@ static enum ggml_status ggml_backend_meta_graph_compute(ggml_backend_t backend, 
                 const bool topk_mirrored = node->src[0] != nullptr &&
                     (strncmp(node->src[0]->name, "indexer_score_tokens", 20) == 0 ||
                      strcmp(node->src[0]->name, "result_output") == 0);
-                const bool bcast_close = topk_bcast && n_backends > 1 &&
+                const bool bcast_close = n_backends > 1 &&
                     node->op == GGML_OP_TOP_K &&
                     !(node->src[0] != nullptr && node->src[0]->op == GGML_OP_LIGHTNING_INDEXER) &&
                     !topk_mirrored;
@@ -3810,13 +3804,9 @@ static enum ggml_status ggml_backend_meta_graph_compute(ggml_backend_t backend, 
 
         // The token graph records every kernel of the token, so the lanes' own per-subgraph caches only add recording work on top.
         // By default they stay on until a token graph is about to be captured: a context whose graphs never capture
-        // (a draft that alternates two shapes) keeps them. GGML_META_INNER_GRAPHS_EAGER_OFF=1 restores the old rule.
-        static const bool inner_eager_off = []() {
-            const char * e = getenv("GGML_META_INNER_GRAPHS_EAGER_OFF");
-            return e != nullptr && atoi(e) != 0;
-        }();
+        // (a draft that alternates two shapes) keeps them.
         if (!backend_ctx->inner_graphs_disabled &&
-                backend_ctx->graph_cache_disable != nullptr && (inner_eager_off || !tge->runs.empty() ||
+                backend_ctx->graph_cache_disable != nullptr && (!tge->runs.empty() ||
                  (!tge->failed && tge->warm + 1 > backend_ctx->tg_warm_needed))) {
             for (size_t j = 0; j < n_backends; j++) {
                 backend_ctx->graph_cache_disable(backend_ctx->backend_configs[j].backend);
