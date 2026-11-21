@@ -1499,6 +1499,7 @@ static int ggml_backend_cuda_comm_allreduce_prepare(void * comm_ctx_v, struct gg
 static void ggml_backend_cuda_comm_allreduce_launch_rank(void * comm_ctx_v, int rank) {
     auto * comm_ctx = static_cast<ggml_backend_cuda_comm_context *>(comm_ctx_v);
     ggml_cuda_ar_launch_rank(comm_ctx->ar_pipeline, rank);
+}
 
 #ifdef GGML_USE_NCCL
 // AllReduce via NCCL. Reduces as FP32 for small tensors and BF16 for large
