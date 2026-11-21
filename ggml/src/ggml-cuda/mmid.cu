@@ -373,6 +373,7 @@ static __global__ void mm_ids_scan_rows(
 static __global__ void mm_ids_expert_prefix(
         const int32_t * __restrict__ row_total, int32_t * __restrict__ expert_bounds, const int n_experts,
         const int64_t n_assignments) {
+    GGML_UNUSED(n_assignments);
     __shared__ int32_t sdata[MM_IDS_SCAN_BLOCK];
     __shared__ int32_t carry;
 
@@ -409,12 +410,7 @@ static __global__ void mm_ids_expert_prefix(
     }
 
     if (threadIdx.x == 0) {
-        // the histogram skips out of range ids, and every consumer of the sort needs a complete permutation:
-        // stop here, as the host checks of the other paths do, instead of handing on unwritten entries
-        if (int64_t(carry) != n_assignments) {
-            printf("mm_ids: expert id out of range\n");
-            __trap();
-        }
+        // out of range ids are skipped, as in mm_ids_helper: a meta backend device holds only a slice of the experts
         expert_bounds[n_experts] = carry;
     }
 }
