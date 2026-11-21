@@ -45,7 +45,7 @@ Use the source map above and this table to decide what needs attention each week
 
 | Feature | Preserve across merges | Final checks when affected | Evidence / when to retire local code |
 | --- | --- | --- | --- |
-| Repack and MMQ/MMVQ | Upload, allocation, layout, dispatch and consumers agree; gfx906 MMQ stays row-first | TP smoke, model generation, matched PP/TG | [Layout](../ggml/src/ggml-cuda/q8_repack/README.md), [rebuild](old-ignore/2026-10-29/rebuild/README.md); retire when upstream covers the layout and measured benefit |
+| Repack and MMQ/MMVQ | Upload, allocation, layout, dispatch and consumers agree; gfx906 MMQ stays row-first | TP smoke, model generation, matched PP/TG | [Layout](q8-repack.md), [rebuild](old-ignore/2026-10-29/rebuild/README.md); retire when upstream covers the layout and measured benefit |
 | Narrow IQ2_S expert path | Only even rows and one output column; other shapes retain fallback | Targeted CPU-reference cases and affected MoE workload, with approval | [IQ2_S record](old-ignore/2026-10-29/iq2s-single-token-experiment/README.md); retire if upstream matches it or benefit disappears |
 | AllReduce and overlap | HIP host staging by default, graph-safe counters and scheduler hooks; peer transport opt-in; RCCL off on this host | TP smoke at both widths and matched PP/TG | [Rebuild](old-ignore/2026-10-29/rebuild/README.md); remove local extensions only when upstream replaces their behavior |
 | TP lanes, token graphs and fusions | Scheduler/readback dependencies, shared-expert reduction and graph update safety; no new per-ubatch host sync | TP smoke, generation and matched PP/TG | [Rebuild](old-ignore/2026-10-29/rebuild/README.md); prefer equivalent upstream paths after validation |
@@ -75,7 +75,7 @@ These merged or compiled cleanly but were wrong. Check them first on each merge.
 
 Update a row when its dispatch, dependencies or validation needs change. Record new evidence once and link it here. DFlash vision remains unvalidated. The [catch-up guide](how-to-catchup.md#one-final-validation-pass) defines the common final pass and approval limits; feature-specific checks join that pass rather than becoming repeated intermediate suites.
 
-The [repack README](../ggml/src/ggml-cuda/q8_repack/README.md) explains its layout and integration. Preserve upload, allocation, dispatch, and consumers together; canonical kernels cannot read repacked weights. For HIP AllReduce, keep the first `#if !defined(GGML_USE_MUSA)` branch in `allreduce.cu` available to HIP. The normal configuration must not depend on an environment switch.
+The [repack README](q8-repack.md) explains its layout and integration. Preserve upload, allocation, dispatch, and consumers together; canonical kernels cannot read repacked weights. For HIP AllReduce, keep the first `#if !defined(GGML_USE_MUSA)` branch in `allreduce.cu` available to HIP. The normal configuration must not depend on an environment switch.
 
 Upstream already provides the basic HIP host-staged AllReduce. The local delta adds graph-replay device counters, separate H2D/D2H streams, prefill slab overlap, prepare/launch scheduler hooks. The opt-in peer-write/two-shot transport (`tp-allreduce.cu`, `GGML_CUDA_PEER_AR=1`) is archived in [old-ignore/2026-11-21/peer-ar](old-ignore/2026-11-21/peer-ar/README.md). The unreachable old HIP overlap-only `#elif` has been removed from `allreduce.cu`; do not restore that duplicate implementation. BF16 transport and its threshold already exist in the upstream base; grouped MoE adds no new precision reduction.
 
