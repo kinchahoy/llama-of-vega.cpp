@@ -112,7 +112,6 @@ Environment knobs:
 - Removed with the stages: `LLAMA_STAGE_LOCAL_MIRROR`, `GGML_META_SPLIT_CARRY_STAGE`, `GGML_META_XFER_RCCL`, `GGML_META_MOE_XFER_RCCL_THRESHOLD`, `GGML_META_NO_DEDICATED_CPY`, `GGML_META_XFER_ROWS`, `GGML_META_LAYER_SEAM_COST`.
 - Removed with DeepSeek V4/V4.1: `LLAMA_MLA_TP` and the fork `LLAMA_DSV41_*` knobs (they were inert). Upstream `LLAMA_DSV41_SPARSE` remains.
 - Removed in cleanup (default path unchanged): `GGML_CUDA_TP_OVERLAP`, `GGML_SCHED_TIMING`, `GGML_SCHED_TIMING_INTERVAL`, `GGML_SCHED_TRACE_INPUTS`, `GGML_SCHED_REBIND_EVENT_TRACE`, `GGML_SCHED_SYNC_NONGRAPH`, `GGML_ALLOC_REALLOC_TRACE`, `GGML_CUDA_GATE_DEBUG`, `GGML_CUDA_REPACK_MOE_FUSION_STATS`, `GGML_CUDA_OP_SYNC`, `GGML_RP_NC_FUSION`, `GGML_RP_NC_RPL`, `GGML_RP_NC_23`, `GGML_RP_GENERIC_MMV`, `LLAMA_REUSE_NO_DRAIN`, `LLAMA_NO_FUSED_LID`.
-- `GGML_TP_AR_NO_GATE` and `GGML_TP_AR_ONESHOT` are now read only in NCCL builds. They were no-ops without NCCL.
 
 Builds must use the README build-ilp flags (`-mllvm -amdgpu-sched-strategy=max-ilp`, CXX `-O3`). A build without them was 2-3% slower on 27B.
 
