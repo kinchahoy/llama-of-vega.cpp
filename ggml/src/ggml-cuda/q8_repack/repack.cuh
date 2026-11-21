@@ -89,7 +89,7 @@ bool ggml_cuda_repack_try_release_scratch(int device);
 // Dense fused MMV admits Q8_0 and MXFP4 only.
 bool ggml_cuda_repack_mmv_fusion_supported(const ggml_tensor * src0);
 
-// The MoE (mul_mat_id) fused MMV admits Q8_0, MXFP4 and, behind GGML_CUDA_REPACK_KQUANT_MOE_FUSION, the Q4_K, Q5_K, Q6_K and IQ4_NL expert weights.
+// The MoE (mul_mat_id) fused MMV admits Q8_0, MXFP4, Q4_K, Q5_K, Q6_K and IQ4_NL expert weights.
 bool ggml_cuda_repack_mmv_id_fusion_supported(const ggml_tensor * src0);
 
 void ggml_cuda_mul_mat_repacked(ggml_backend_cuda_context & ctx,

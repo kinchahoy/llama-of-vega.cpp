@@ -2082,11 +2082,7 @@ static void ggml_cuda_mul_mat_cublas_impl(ggml_backend_cuda_context & ctx, const
 
     // A large 2D weight (a BF16 output head is 2.5 GiB as F32) is converted and multiplied in row blocks, so the workspace stays bounded.
     // Each output row is the product of one weight row, so the blocks give the same rows as one call.
-    static const size_t chunk_budget = [] {
-        const char * e = getenv("GGML_CUDA_CUBLAS_CHUNK_MIB");
-        const size_t mib = e ? size_t(std::max(0, atoi(e))) : 256;
-        return mib ? mib << 20 : SIZE_MAX; // 0 keeps the whole weight in one conversion
-    }();
+    constexpr size_t chunk_budget = size_t(256) << 20;
     const bool    chunk_src0   = compute_type == GGML_TYPE_F32 && src0->type != compute_type && ne02 == 1 && ne03 == 1 && ne12 == 1 && ne13 == 1 &&
                                  ggml_is_contiguously_allocated(src0) && ggml_nelements(src0)*sizeof(cuda_t) > chunk_budget;
     const int64_t chunk_rows   = chunk_src0 ? std::max<int64_t>(1, chunk_budget/(ne00*sizeof(cuda_t))) : ne01;
@@ -2557,16 +2553,6 @@ static bool ggml_cuda_should_fuse_mul_mat_vec_q(const ggml_tensor * tensor) {
 // leaving a spare slot for a graph that interleaves two activations.
 #define GGML_CUDA_Q8_1_CACHE_MAX_ENTRIES 2
 
-// On by default. GGML_CUDA_Q8_1_CACHE=0 disables it, which restores the previous
-// behaviour exactly: every matmul quantizes its own copy of src1.
-static bool ggml_cuda_q8_1_cache_enabled() {
-    static const bool enabled = [] {
-        const char * e = getenv("GGML_CUDA_Q8_1_CACHE");
-        return e == nullptr || atoi(e) != 0;
-    }();
-    return enabled;
-}
-
 // Hand back the quantized copy of src1 made earlier in this graph evaluation, or
 // allocate a fresh buffer and report a miss so the caller quantizes into it. The
 // variant separates layouts that are not interchangeable (mmvq row-wise vs each
@@ -2586,7 +2572,7 @@ char * ggml_cuda_q8_1_cache_acquire(
         *pressure = false;
     }
 
-    if (!ggml_cuda_q8_1_cache_enabled() || !src1) {
+    if (!src1) {
         return nullptr;
     }
 
@@ -4915,25 +4901,11 @@ static bool ggml_cuda_can_fuse(const struct ggml_cgraph *                cgraph,
     return false;
 }
 
-// The fusion and its allocation dependencies are switched together, they are not sound apart.
-// GGML_CUDA_MOE_WEIGHTED_REDUCTION=0 selects the unfused MUL and ADD chain.
-static bool ggml_cuda_moe_weighted_reduction_enabled() {
-    static const bool enabled = [] {
-        const char * env = getenv("GGML_CUDA_MOE_WEIGHTED_REDUCTION");
-        return env == nullptr || std::atoi(env) != 0;
-    }();
-    return enabled;
-}
-
 // Pick the Q8_1 cache buffer a producer can fill for a single-row output that a later quantized mat-vec in this graph reads as src1.
 // Uses the same key as the consumer, so the consumer finds a hit and skips its own quantize launch.
 static block_q8_1 * ggml_cuda_q8_1_producer_target(ggml_backend_cuda_context & ctx, const ggml_cgraph * cgraph, int out_idx) {
-    static const bool enabled = [] {
-        const char * e = getenv("GGML_CUDA_Q8_1_PRODUCER");
-        return e == nullptr || atoi(e) != 0;
-    }();
     const ggml_tensor * out = cgraph->nodes[out_idx];
-    if (!enabled || out->ne[1] != 1 || out->ne[2] != 1 || out->ne[3] != 1 || !ggml_is_contiguous(out)) {
+    if (out->ne[1] != 1 || out->ne[2] != 1 || out->ne[3] != 1 || !ggml_is_contiguous(out)) {
         return nullptr;
     }
     bool has_consumer = false;
@@ -4960,12 +4932,8 @@ static int ggml_cuda_try_fuse(ggml_backend_cuda_context * cuda_ctx, ggml_cgraph 
 
     ggml_tensor * node = cgraph->nodes[i];
 
-    static const bool fuse_add_rms_norm = [] {
-        const char * e = getenv("GGML_CUDA_FUSE_ADD_RMS_NORM");
-        return e == nullptr || atoi(e) != 0;
-    }();
     // residual add followed by the next norm: the add result stays a graph output
-    if (fuse_add_rms_norm && node->op == GGML_OP_ADD &&
+    if (node->op == GGML_OP_ADD &&
             ggml_can_fuse_subgraph(cgraph, i, { GGML_OP_ADD, GGML_OP_RMS_NORM, GGML_OP_MUL }, { i, i + 2 }) &&
             ggml_cuda_add_rms_norm_mul_supported(node, cgraph->nodes[i + 1], cgraph->nodes[i + 2])) {
         block_q8_1 * q = ggml_cuda_q8_1_producer_target(*cuda_ctx, cgraph, i + 2);
@@ -4993,7 +4961,7 @@ static int ggml_cuda_try_fuse(ggml_backend_cuda_context * cuda_ctx, ggml_cgraph 
         }
     }
 
-    if (node->op == GGML_OP_MUL && ggml_cuda_moe_weighted_reduction_enabled()) {
+    if (node->op == GGML_OP_MUL) {
         ggml_cuda_moe_weighted_reduction_match match;
         if (ggml_cuda_match_moe_weighted_reduction(cgraph, i, match)) {
             const int output_idx = i + match.node_count - 1;
@@ -6311,7 +6279,7 @@ static void ggml_backend_cuda_graph_optimize(ggml_backend_t backend, ggml_cgraph
             }
 
             ggml_cuda_moe_weighted_reduction_match match;
-            if (ggml_cuda_moe_weighted_reduction_enabled() && ggml_cuda_match_moe_weighted_reduction(cgraph, i, match, /* for_alloc_deps = */ true)) {
+            if (ggml_cuda_match_moe_weighted_reduction(cgraph, i, match, /* for_alloc_deps = */ true)) {
                 params->add_alloc_dep(params->user_data, const_cast<ggml_tensor *>(match.experts), match.dst);
                 params->add_alloc_dep(params->user_data, const_cast<ggml_tensor *>(match.weights), match.dst);
                 if (match.expert_scale != nullptr) {
@@ -7860,11 +7828,7 @@ static ggml_backend_t ggml_backend_cuda_init_impl(int device, bool copy_only) {
 
     // The BLAS handle and its library state take device memory on first use, which is after the compute buffers were sized.
     // Creating it here lets the reserve see that memory, so a layout that leaves no room for it fails at reserve instead of at the first prompt.
-    static const bool eager_blas_handle = [] {
-        const char * s = getenv("GGML_CUDA_EAGER_BLAS_HANDLE");
-        return s == nullptr || atoi(s) != 0;
-    }();
-    if (eager_blas_handle && !copy_only) {
+    if (!copy_only) {
         ctx->cublas_handle();
     }
 

@@ -245,12 +245,8 @@ static __global__ void concat_dim0_transposed(
 }
 
 static bool concat_dim0_transposed_ok(const ggml_tensor * src0, const ggml_tensor * src1, const ggml_tensor * dst, int dim) {
-    static const bool enabled = [] {
-        const char * e = getenv("GGML_CUDA_CONCAT_TRANSPOSED");
-        return e == nullptr || atoi(e) != 0;
-    }();
     const size_t ts = ggml_type_size(dst->type);
-    return enabled && dim == 0 && !ggml_is_quantized(dst->type) && ts == 4 &&
+    return dim == 0 && !ggml_is_quantized(dst->type) && ts == 4 &&
         ggml_is_contiguous(dst) && src0->nb[0] == ts && src1->nb[1] == ts && src1->nb[0] >= ts*src1->ne[1] &&
         src0->ne[1] == src1->ne[1] && src0->ne[2] == src1->ne[2] &&
         src0->ne[3] == 1 && src1->ne[3] == 1 && src1->ne[2] <= 65535 && src1->ne[1] / CONCAT_T_TILE < 65535;
