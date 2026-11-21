@@ -1297,13 +1297,7 @@ static int ggml_backend_sched_default_n_copies(ggml_backend_t * backends, int n_
         return 1;
     }
 
-    // The ring depth bounds how many ubatches can be in flight. Every slot
-    // costs another copy of the graph inputs, so GGML_SCHED_N_COPIES overrides this.
-    static const size_t n_copies_env = []() {
-        const char * env = getenv("GGML_SCHED_N_COPIES");
-        return env != nullptr ? (size_t) std::max(1, atoi(env)) : (size_t) 0;
-    }();
-
+    // The ring depth bounds how many ubatches can be in flight. Every slot costs another copy of the graph inputs.
     size_t n_devices = 0;
     for (int i = 0; i < n_backends; i++) {
         if (ggml_backend_dev_type(ggml_backend_get_device(backends[i])) == GGML_BACKEND_DEVICE_TYPE_GPU) {
@@ -1311,7 +1305,7 @@ static int ggml_backend_sched_default_n_copies(ggml_backend_t * backends, int n_
         }
     }
 
-    size_t n_copies = n_copies_env != 0 ? n_copies_env : std::max<size_t>(4, n_devices);
+    size_t n_copies = std::max<size_t>(4, n_devices);
 
     return (int) std::min<size_t>(n_copies, GGML_SCHED_MAX_COPIES);
 }
@@ -1390,83 +1384,35 @@ static ggml_backend_sched_input_staging * ggml_backend_sched_get_input_staging(
     return slot;
 }
 
-static size_t ggml_backend_sched_input_staging_max_size() {
-    static const size_t max_size = []() {
-        const char * env = getenv("GGML_SCHED_INPUT_STAGING_MAX");
-        if (env != nullptr) {
-            return (size_t) atoll(env);
-        }
-        return (size_t) 16*1024;
-    }();
-    return max_size;
-}
-
 static bool ggml_backend_sched_backend_is_multi_meta(ggml_backend_t backend) {
     return ggml_backend_is_meta(backend) && ggml_backend_meta_n_backends(backend) > 1;
-}
-
-static bool ggml_backend_sched_stage_simple_gpu_inputs() {
-    static const bool enabled = []() {
-        const char * env = getenv("GGML_SCHED_STAGE_SIMPLE_GPU_INPUTS");
-        return env && env[0] != '\0' && env[0] != '0';
-    }();
-    return enabled;
 }
 
 static size_t ggml_backend_sched_input_staging_type_max_size(ggml_backend_t backend, enum ggml_type type) {
     switch (type) {
         case GGML_TYPE_I32:
-            return ggml_backend_sched_input_staging_max_size();
-        case GGML_TYPE_I64: {
-            static const size_t max_size = []() {
-                const char * env = getenv("GGML_SCHED_INPUT_STAGING_I64_MAX");
-                return env != nullptr ? (size_t) atoll(env) : (size_t) 64;
-            }();
-            return max_size;
-        }
-        case GGML_TYPE_F32: {
-            static const size_t max_size = []() {
-                const char * env = getenv("GGML_SCHED_INPUT_STAGING_F32_MAX");
-                return env != nullptr ? (size_t) atoll(env) : (size_t) -1;
-            }();
-            return max_size != (size_t) -1 ? max_size :
-                (ggml_backend_sched_backend_is_multi_meta(backend) ? (size_t) 4096 : (size_t) 0);
-        }
-        case GGML_TYPE_F16: {
+            return 16*1024;
+        case GGML_TYPE_I64:
+            return 64;
+        case GGML_TYPE_F32:
+            return ggml_backend_sched_backend_is_multi_meta(backend) ? (size_t) 4096 : (size_t) 0;
+        case GGML_TYPE_F16:
             // f16 kq masks are the largest per-ubatch inputs (n_kv x n_ubatch).
             // The unstaged fallback copies them synchronously, which blocks the
             // host on the lane stream behind the whole in-flight graph and
             // serializes prefill chunks. Stage them like the other inputs.
-            static const size_t max_size = []() {
-                const char * env = getenv("GGML_SCHED_INPUT_STAGING_F16_MAX");
-                return env != nullptr ? (size_t) atoll(env) : (size_t) -1;
-            }();
-            return max_size != (size_t) -1 ? max_size :
-                (ggml_backend_sched_backend_is_multi_meta(backend) ? (size_t) 512*1024*1024 : (size_t) 0);
-        }
+            return ggml_backend_sched_backend_is_multi_meta(backend) ? (size_t) 512*1024*1024 : (size_t) 0;
         default:
             return 0;
     }
 }
 
 static size_t ggml_backend_sched_non_graph_input_staging_max_size(ggml_backend_t backend) {
-    static const size_t max_size = []() {
-        const char * env = getenv("GGML_SCHED_NON_GRAPH_INPUT_STAGING_MAX");
-        return env != nullptr ? (size_t) atoll(env) : (size_t) -1;
-    }();
-    return max_size != (size_t) -1 ? max_size :
-        (ggml_backend_sched_backend_is_multi_meta(backend) ? (size_t) 32768 : (size_t) 0);
+    return ggml_backend_sched_backend_is_multi_meta(backend) ? (size_t) 32768 : (size_t) 0;
 }
 
 static bool ggml_backend_sched_should_stage_input(ggml_backend_t backend, const ggml_tensor * input, size_t size) {
-    if (ggml_backend_sched_input_staging_max_size() == 0) {
-        return false;
-    }
-
-    const enum ggml_backend_dev_type dev_type = ggml_backend_dev_type(ggml_backend_get_device(backend));
-    const bool backend_ok =
-        dev_type == GGML_BACKEND_DEVICE_TYPE_META ||
-        (ggml_backend_sched_stage_simple_gpu_inputs() && dev_type == GGML_BACKEND_DEVICE_TYPE_GPU);
+    const bool backend_ok = ggml_backend_dev_type(ggml_backend_get_device(backend)) == GGML_BACKEND_DEVICE_TYPE_META;
 
     const size_t max_size = ggml_backend_sched_input_staging_type_max_size(backend, input->type);
     return size > 0 &&
