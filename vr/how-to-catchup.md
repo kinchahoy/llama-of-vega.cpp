@@ -4,7 +4,7 @@ Keep upstream interfaces and the smallest local delta that preserves the gfx906 
 
 Keep the separate `separate-experiment` output-style project out of this performance patch chain. The accepted grouped-MoE subset from `flashnext-fast` belongs in this patch chain, including its tests and dispatch/fallback guards. Its separate GPU-feedback experiment does not. Model priorities are listed in [the current guide](README.md#priorities-and-separate-work).
 
-Current overlay base: official `36a0e2ffc0b352b774f8d71c43668b75b3061ef5`. The active [patch kit](patches/llama-head-36a0e2ffc/README.md) exports stage D of the [2026-10-29 rebuild](old-ignore/2026-10-29/rebuild/README.md). The previous kit ([`418f905a4`](old-ignore/2026-10-29/patches/llama-head-418f905a4/README.md)) and the older checkpoint (`84932540a0b8fbcd67128b8615da434763c185ec` on `344be0a60074e6395da3c4a4f300f7361df5a67d`) are historical; do not reuse their intermediate trees for a new upstream base. Use the reviewed current branch as the source of truth.
+Current overlay base: official `46eb1742db6d2caec1bfa848c5702b1bdcc815e5`. The active [patch kit](patches/llama-head-46eb1742d/README.md) is a 12-group per-feature stack; refresh it with its `regenerate.py --target <commit>` and `verify.py`. The previous kit ([`36a0e2ffc`](old-ignore/2026-11-21/patches/llama-head-36a0e2ffc/README.md), stage D of the [2026-10-29 rebuild](old-ignore/2026-10-29/rebuild/README.md)) and the older [`418f905a4`](old-ignore/2026-10-29/patches/llama-head-418f905a4/README.md) kit are historical; do not reuse their intermediate trees for a new upstream base. Use the reviewed current branch as the source of truth.
 
 The rebuild removed multi-stage TP (`-tps`) and the fork-only DeepSeek V4/V4.1, MiniMax-M2 and MiMo-2 code. Do not restore them during a merge; take upstream for those models. See [the removed and changed list](IMPROVEMENTS.md#2026-10-29-rebuild-removed-and-changed).
 
@@ -166,7 +166,7 @@ set -euo pipefail
 REPO=$(git rev-parse --show-toplevel)
 # UPSTREAM_HEAD is the pinned SHA from the merge step.
 UPSTREAM_SHORT=$(git rev-parse --short=9 "$UPSTREAM_HEAD")
-KIT="$REPO/vr/patches/llama-head-36a0e2ffc"
+KIT="$REPO/vr/old-ignore/2026-11-21/patches/llama-head-36a0e2ffc"  # old 5-patch procedure; the current kit uses regenerate.py
 cd "$REPO"
 test -z "$(git ls-files -u)"
 git diff --exit-code
