@@ -294,6 +294,8 @@ Merge `296a9e2c0` plus build fixes, then cleanup (peer AllReduce archived, about
 
 Unsloth #264 on the same build (`GGML_CUDA_MOE_COUNTING_SORT=0` vs default), Flash Next: PP2048 at `-ub 512` 657.3 vs 657.0 (0.0%), TG128 50.31 vs 50.32; PP2048 at `-b 2048 -ub 2048` 877.4 vs 895.5 (+2.1%, both on runs above both off runs). MTP3 against the cleanup build: 59.57 vs 59.91 t/s, 49.32 vs 49.08 ms/step, acc 0.660 both; greedy Flash Next text identical. The first port trapped on out of range ids and aborted on ROCm1 under `-sm tensor` (meta expert slices); fixed in `400989a0d`.
 
+27B 4 x 16K repeat, order A,B,B,A, base vs `build-u1sort-20261121`: PP 576.3 / 568.0 vs 566.3 / 571.8 (-0.5%), 4-way TG 85.57 / 82.27 vs 82.27 / 82.46 (-1.8%). Only the first, coldest run (start 49C, others 56-59C) is faster; the last base run equals the new build (82.27), so the drop is the start temperature, not the code. Both pairs ran base first from cold.
+
 TP check pass at n 1 and 2048 for each build; 27B greedy text identical; `test-backend-ops` MUL_MAT_ID, TOP_K, SET_ROWS, GATED_DELTA_NET, GET_ROWS pass on ROCm0 (1152 and 352 cases with #264).
 
 Merge notes: two conflicts (`top-k.cu` ours, `mmid.cu` fork overloads with upstream `ne_store`). Silent traps fixed: `expert_bounds` last entry `nex_prev + n_dumped`, `GGML_OP_COUNT` 101 (upstream SLEEP plus DSV4_HC_MIX), `build_attn_iswa_impl` needs `gctx.build_cpy_k`. Core delta vs upstream: +15276/-1039 in 121 files (was +16426/-995 in 124 against edec462cc), with #264 adding +715.
