@@ -120,6 +120,10 @@ Still open:
 - Move `ggml-cuda.cu` glue into separate files.
 - Expose `event_query` through the proc-address table instead of one-line backend edits.
 
+## 2026-11-21 env knob removal
+
+Sweep-only env knobs and off-by-default experiments were removed with defaults unchanged: q8_repack `GGML_RP_*`, scheduler staging and `GGML_SCHED_N_COPIES`, `GGML_GALLOC_LAYOUT_CACHE`, several `GGML_CUDA_*` fusion and cache switches, `GGML_META_*` switches, and `LLAMA_TAP_*`, `LLAMA_DFLASH_*`, `LLAMA_DSPARK_*`, `LLAMA_KV_REPLICA`, `LLAMA_PLE_PREFAULT` and the draft pipeline opt-ins. Archived 2026-11-21, see [old-ignore/2026-11-21/knobs](old-ignore/2026-11-21/knobs/README.md) for the reverse patches and how to retry.
+
 ## Worth revisiting
 
 - RCCL after both GPUs have suitable CPU-connected PCIe lanes. Its current exclusion reflects this host's topology.
