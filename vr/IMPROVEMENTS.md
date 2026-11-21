@@ -71,6 +71,7 @@ These merged or compiled cleanly but were wrong. Check them first on each merge.
 - Upstream `hv_tensor_requires_copy` (#31419) skips split inputs that were not flagged. The fork `GGML_SCHED_SHARE_VIEW_INPUTS` path adds the view's root to `split->inputs`, so it must flag the root too, or the root copy is never uploaded (found on the aa75ff323 merge).
 - The fork `top-k.cu` (count/offsets/gather) is kept over upstream #31084: upstream makes only the tie set deterministic, while the fork also fixes the output order that the backend sampler and DFlash rely on. HIP has no CUB, so rows wider than 1024 columns use it.
 - Upstream MTP device rows (`dev_rows`, #31927) are opt-in (`LLAMA_MTP_DEV_ROWS=1`) and exclude the fork deferred prefill, which stays the default.
+- After upstream `b94959a64` (#32505) `mm_ids_helper` resets `it_compact` after each store dump, so the `mmid.cu` `expert_bounds` last entry must be `nex_prev + n_dumped`, not `it_compact` (auto-merge keeps the old value, which drops the last expert's rows in repack and grouped MoE).
 
 Update a row when its dispatch, dependencies or validation needs change. Record new evidence once and link it here. DFlash vision remains unvalidated. The [catch-up guide](how-to-catchup.md#one-final-validation-pass) defines the common final pass and approval limits; feature-specific checks join that pass rather than becoming repeated intermediate suites.
 
