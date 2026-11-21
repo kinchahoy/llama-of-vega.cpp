@@ -4584,11 +4584,7 @@ private:
     }
 
     bool reserve_prompt_graph(const common_batch & batch_view) {
-        static const bool enabled = []() {
-            const char * value = getenv("LLAMA_DSPARK_PROMPT_RESERVE");
-            return value == nullptr || atoi(value) != 0;
-        }();
-        if (!enabled || !spec || slots.size() != 1 || llama_n_seq_max(ctx_tgt) != 1 ||
+        if (!spec || slots.size() != 1 || llama_n_seq_max(ctx_tgt) != 1 ||
                 params_base.split_mode != LLAMA_SPLIT_MODE_LAYER || llama_model_n_devices(model_tgt) < 2 ||
                 batch.has_embd() || batch_view.tokens.empty() || batch_view.tokens[0].pos[0] != 0 ||
                 batch_view.size() <= (int32_t) llama_n_ubatch(ctx_tgt) || !batch.tokens.front().is_prompt) {

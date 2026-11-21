@@ -426,7 +426,7 @@ private:
     void layer_inp_accum_events_free();
 
     // Persistent device tensors for the layer-input taps, indexed by lid. Used in all split
-    // modes unless LLAMA_TAP_STATIC=0. Kept out of the galloc arena. Rebuilt by sched_reserve.
+    // modes. Kept out of the galloc arena. Rebuilt by sched_reserve.
     ggml_context_ptr        ctx_layer_inp_tap;
     ggml_backend_buffer_ptr buf_layer_inp_tap;
 

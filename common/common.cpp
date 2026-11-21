@@ -1724,9 +1724,8 @@ struct llama_model_params common_model_params_to_llama(common_params & params) {
 
     // Target-side repacking changes the verification rounding enough to lower
     // DSpark acceptance on gfx906. The draft already loads without extra buffer
-    // types, so keep the target unrepacked too unless explicitly requested.
-    const char * dspark_target_repack = std::getenv("LLAMA_DSPARK_TARGET_REPACK");
-    if (spec_dspark && (dspark_target_repack == nullptr || std::atoi(dspark_target_repack) == 0)) {
+    // types, so keep the target unrepacked too.
+    if (spec_dspark) {
         mparams.use_extra_bufts = false;
     }
 

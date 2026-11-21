@@ -605,13 +605,8 @@ llama_context::llama_context(
             ((model.split_mode() == LLAMA_SPLIT_MODE_LAYER && model.n_devices() > 1) ||
              model.split_mode() == LLAMA_SPLIT_MODE_TENSOR);
 
-        // The MTP draft graph is tiny, the ring only costs TG. Opt in with LLAMA_MTP_DRAFT_PIPELINE.
-        if (params.ctx_type == LLAMA_CONTEXT_TYPE_MTP && !getenv("LLAMA_MTP_DRAFT_PIPELINE")) {
-            pipeline_parallel = false;
-        }
-
-        // A sidecar drafter decodes one token at a time, the ring does not help it. Opt in with LLAMA_DRAFT_PIPELINE.
-        if (cparams.ctx_other != nullptr && !getenv("LLAMA_DRAFT_PIPELINE")) {
+        // The MTP draft graph is tiny, the ring only costs TG. A sidecar drafter decodes one token at a time, the ring does not help it.
+        if (params.ctx_type == LLAMA_CONTEXT_TYPE_MTP || cparams.ctx_other != nullptr) {
             pipeline_parallel = false;
         }
 
@@ -888,18 +883,15 @@ void llama_context::sched_reserve() {
     resolve_fused_ops(mctx.get(), n_seqs);
 
     // Persistent tap tensors live outside the scheduler compute arena, so runtime graphs keep fitting the plan.
-    // LLAMA_TAP_STATIC=0 restores in-arena taps.
     layer_inp_tap.assign(cparams.embeddings_layer_inp.size(), nullptr);
     buf_layer_inp_tap.reset();
     ctx_layer_inp_tap.reset();
     {
-        static const char * s_tap_static = getenv("LLAMA_TAP_STATIC");
-        const bool want_static = s_tap_static == nullptr || atoi(s_tap_static) != 0;
         int n_taps = 0;
         for (bool enabled : cparams.embeddings_layer_inp) {
             n_taps += enabled ? 1 : 0;
         }
-        if (want_static && n_taps > 0 && model.dev_output()) {
+        if (n_taps > 0 && model.dev_output()) {
             // Graph reservation rounds token counts up to a whole sequence batch.
             const int64_t n_tap_rows = std::max<int64_t>(cparams.n_ubatch,
                     ((int64_t(n_tokens) + n_seqs - 1) / n_seqs) * n_seqs);
@@ -3138,16 +3130,6 @@ bool llama_context::extract_layer_inputs(const llm_graph_result * res, size_t to
     // runs once and reuse them for every tapped layer. The common single-request
     // prefill remains one D2H per layer; combined server batches are split into
     // sequence runs so identical positions in different slots cannot collide.
-    static const int32_t accum_min = []() {
-        const char * e = getenv("LLAMA_TAP_ACCUM_MIN");
-        return e != nullptr ? atoi(e) : 1;
-    }();
-    // A prompt chunk that lands in the accum as one run is read from there only, so skip its second D2H copy.
-    // LLAMA_TAP_EMBD_SKIP=0 always copies.
-    static const bool embd_skip = []() {
-        const char * e = getenv("LLAMA_TAP_EMBD_SKIP");
-        return e == nullptr || atoi(e) != 0;
-    }();
 
     struct accum_run {
         llama_seq_id seq_id;
@@ -3157,13 +3139,8 @@ bool llama_context::extract_layer_inputs(const llm_graph_result * res, size_t to
     };
     std::vector<accum_run> accum_runs;
 
-    // M-RoPE text rows carry the text position in the first section. LLAMA_TAP_ACCUM_MROPE=0 restores n_pos == 1 only.
-    static const bool accum_mrope = []() {
-        const char * e = getenv("LLAMA_TAP_ACCUM_MROPE");
-        return e == nullptr || atoi(e) != 0;
-    }();
-    bool accum_ok = layer_inp_accum && ubatch.pos && (ubatch.n_pos == 1 || (accum_mrope && ubatch.n_pos >= 1)) &&
-                    (int32_t) n_tokens >= accum_min;
+    // M-RoPE text rows carry the text position in the first section.
+    bool accum_ok = layer_inp_accum && ubatch.pos && ubatch.n_pos >= 1 && n_tokens >= 1;
     for (size_t i = 0; accum_ok && i < n_tokens; ++i) {
         const llama_pos pos = ubatch.pos[i];
         if (pos < 0 || pos >= layer_inp_accum_cap || ubatch.n_seq_id[i] <= 0) {
@@ -3223,7 +3200,8 @@ bool llama_context::extract_layer_inputs(const llm_graph_result * res, size_t to
 
         const bool layer_accum_ok = accum_ok && layer_inp_accum_idx[il] >= 0 &&
                                     row_floats == model.hparams.n_embd;
-        if (!(embd_skip && layer_accum_ok && accum_runs.size() == 1 && n_tokens >= 16)) {
+        // A prompt chunk that lands in the accum as one run is read from there only, so skip its second D2H copy.
+        if (!(layer_accum_ok && accum_runs.size() == 1 && n_tokens >= 16)) {
             // Tensor-split backends require a zero source offset.
             ggml_backend_tensor_get_async(backend, t, embd_layer_inp[il].data + dst_offset, 0, nbytes);
         }

@@ -171,7 +171,6 @@ public:
 
     // A layer that reuses another layer's cache from a different device reads a replica on its own device.
     // Replicas take the same rows in the same graph (llm_graph_context::build_cpy_k and build_get_k), so they stay bit-identical.
-    // LLAMA_KV_REPLICA=0 reads the owner's device instead.
     bool has_replicas() const;
     int32_t get_replica_id(int32_t il) const; // replica read by layer il, or -1
     int32_t get_replica_owner(int32_t ir) const;

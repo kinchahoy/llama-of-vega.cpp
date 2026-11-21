@@ -276,8 +276,7 @@ llama_kv_cache::llama_kv_cache(
 
             LLAMA_LOG_DEBUG("%s: - layer %3d: reuse layer %d, is_swa = %d\n", __func__, il, il_reuse, hparams.is_swa(il));
 
-            const char * env_replica = getenv("LLAMA_KV_REPLICA");
-            if (!offload || (env_replica && atoi(env_replica) == 0)) {
+            if (!offload) {
                 continue;
             }
 
