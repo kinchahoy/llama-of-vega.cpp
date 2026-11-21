@@ -11,17 +11,6 @@ static void ggml_cuda_mul_mat_repacked_slice(ggml_backend_cuda_context & ctx,
         float * dst_d, int64_t ne00, int64_t ne01, int64_t ne11,
         cudaStream_t stream);
 
-// Rows per workgroup of the single-token Q8_0 mat-vec, one wave per row. Only one 16-wave group fits a CU,
-// so smaller groups shorten the partly empty last dispatch round. GGML_RP_MMV_ROWS selects 16, 8 (default) or 4.
-static int rp_q8_0_mmv_rows() {
-    static const int rows = [] {
-        const char * e = getenv("GGML_RP_MMV_ROWS");
-        const int r = e != nullptr ? atoi(e) : 8;
-        return r == 4 || r == 16 ? r : 8;
-    }();
-    return rows;
-}
-
 template <bool HAS_FUSION>
 static void rp_q8_0_mmv_launch(const uint8_t * w, const block_q8_1 * xq, float * dst_d,
         const int64_t ne00, const int64_t ne01, const uint8_t * w_gate, const float * x_bias,
@@ -31,11 +20,8 @@ static void rp_q8_0_mmv_launch(const uint8_t * w, const block_q8_1 * xq, float *
         w, xq, dst_d, (uint32_t) ne00, (uint32_t) ne01, \
         nullptr, nullptr, nullptr, 0, 1, 0, 0, 0, \
         w_gate, x_bias, gate_bias, glu_op)
-    switch (rp_q8_0_mmv_rows()) {
-        case 4:  RP_Q8_0_MMV(4);  break;
-        case 8:  RP_Q8_0_MMV(8);  break;
-        default: RP_Q8_0_MMV(16); break;
-    }
+    // 8 rows per workgroup: only one 16-wave group fits a CU, so smaller groups shorten the partly empty last dispatch round.
+    RP_Q8_0_MMV(8);
 #undef RP_Q8_0_MMV
 }
 template <ggml_type WT, bool XPLANAR = false>
@@ -44,14 +30,6 @@ static void ggml_cuda_mul_mat_repacked_nc_t(
         const int64_t ne00, const int64_t ne01, const int64_t ne11,
         const uint32_t xs, const uint32_t ys, cudaStream_t stream);
 
-// Q8_0 narrow batches read planar activations. GGML_RP_NC_PLANAR=0 reads block_q8_1 rows as before.
-static bool rp_nc_planar() {
-    static const bool on = [] {
-        const char * e = getenv("GGML_RP_NC_PLANAR");
-        return e == nullptr || atoi(e) != 0;
-    }();
-    return on;
-}
 #define RP_NC_PLANAR_VARIANT 100
 
 void ggml_cuda_mul_mat_repacked(ggml_backend_cuda_context & ctx,
@@ -90,7 +68,7 @@ void ggml_cuda_mul_mat_repacked(ggml_backend_cuda_context & ctx,
         ggml_cuda_pool_alloc<block_q8_1> src1_q8_1_own;
         ggml_cuda_pool_alloc<char> src1_planar_own;
         block_q8_1 * src1_q8_1_d;
-        const bool planar = ne11 > 1 && wtype == GGML_TYPE_Q8_0 && rp_nc_planar();
+        const bool planar = ne11 > 1 && wtype == GGML_TYPE_Q8_0;
         {
             const int64_t s11 = src1->nb[1] / sizeof(float);
             const int64_t s12 = src1->nb[2] / sizeof(float);
@@ -292,23 +270,12 @@ static void ggml_cuda_mul_mat_repacked_nc_t(
     const bool    work_ok   = n_blocks >= RP_NC_MIN_ACCUM * RP_NC_LANES_WIDE;
     const bool    lanes16_ok = work_ok && (ne01 + 31) / 32 >= min_grid;
     const bool    lanes32_ok = work_ok && (ne01 +  7) /  8 >= min_grid;
-    // 16 lanes per row: short rows loop longer before the reduction, and the 4 row groups of a wave share activation reads.
-    // GGML_RP_NC_L16=0 keeps 64 lanes per row for 4-8 columns.
-    static const bool l16 = [] {
-        const char * e = getenv("GGML_RP_NC_L16");
-        return e == nullptr || atoi(e) != 0;
-    }();
-    // GGML_RP_NC_LDS=0: every row group reads the activations from L1/L2 instead of a shared LDS tile.
-    static const bool nc_lds = [] {
-        const char * e = getenv("GGML_RP_NC_LDS");
-        return e == nullptr || atoi(e) != 0;
-    }();
     switch (ne11) {
         case 2: {
             if (lanes16_ok) {
                 // 16 lanes to a row, 32 rows per block, one row per lane.
                 const dim3 grid((ne01 + 31) / 32, 1, 1);
-                if (XPLANAR && nc_lds) {
+                if (XPLANAR) {
                     mul_mat_vec_repacked_nc<32, 8, 2, 1, 16, WT, XPLANAR, XPLANAR><<<grid, 512, 0, stream>>>(
                         w, xq, dst_d, (uint32_t) ne00, (uint32_t) ne01, xs, ys);
                     break;
@@ -325,7 +292,7 @@ static void ggml_cuda_mul_mat_repacked_nc_t(
             if (lanes32_ok) {
                 // 32 lanes to a row, 8 rows per block, one row per lane.
                 const dim3 grid((ne01 + 7) / 8, 1, 1);
-                if (XPLANAR && nc_lds) {
+                if (XPLANAR) {
                     mul_mat_vec_repacked_nc<8, 4, 3, 1, 32, WT, XPLANAR, XPLANAR><<<grid, 256, 0, stream>>>(
                         w, xq, dst_d, (uint32_t) ne00, (uint32_t) ne01, xs, ys);
                     break;
@@ -341,13 +308,13 @@ static void ggml_cuda_mul_mat_repacked_nc_t(
         // 4-8 columns are bound by the per-column activation reads, not the weights.
 #define RP_NC_CASE_L(L, NC) \
         case L: { \
-            if (l16 && lanes16_ok && XPLANAR && nc_lds) { \
+            if (lanes16_ok && XPLANAR) { \
                 mul_mat_vec_repacked_nc<32, 4, NC, 2, 16, WT, XPLANAR, XPLANAR><<<dim3((ne01 + 31) / 32, 1, 1), 256, 0, stream>>>( \
                     w, xq, dst_d, (uint32_t) ne00, (uint32_t) ne01, xs, ys); \
-            } else if (l16 && lanes16_ok) { \
+            } else if (lanes16_ok) { \
                 mul_mat_vec_repacked_nc<32, 4, NC, 2, 16, WT, XPLANAR><<<dim3((ne01 + 31) / 32, 1, 1), 256, 0, stream>>>( \
                     w, xq, dst_d, (uint32_t) ne00, (uint32_t) ne01, xs, ys); \
-            } else if (l16 && lanes32_ok) { \
+            } else if (lanes32_ok) { \
                 mul_mat_vec_repacked_nc<8, 2, NC, 2, 32, WT, XPLANAR><<<dim3((ne01 + 7) / 8, 1, 1), 128, 0, stream>>>( \
                     w, xq, dst_d, (uint32_t) ne00, (uint32_t) ne01, xs, ys); \
             } else { \
