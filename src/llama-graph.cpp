@@ -4042,18 +4042,18 @@ static ggml_tensor * build_attn_iswa_impl(
     if (store_kv && k_cur) {
         const auto & k_idxs = is_swa ? inp->get_k_idxs_swa() : inp->get_k_idxs();
 
-        build_cpy_k(mctx_cur, k_cur, k_idxs, il);
+        gctx.build_cpy_k(mctx_cur, k_cur, k_idxs, il);
     }
 
     if (store_kv && v_cur) {
         const auto & v_idxs = is_swa ? inp->get_v_idxs_swa() : inp->get_v_idxs();
 
-        build_cpy_v(mctx_cur, v_cur, v_idxs, il);
+        gctx.build_cpy_v(mctx_cur, v_cur, v_idxs, il);
     }
 
     ggml_tensor * q = q_cur;
-    ggml_tensor * k = use_kv_cur ? k_cur : build_get_k(mctx_cur, il);
-    ggml_tensor * v = use_kv_cur ? v_cur : build_get_v(mctx_cur, il);
+    ggml_tensor * k = use_kv_cur ? k_cur : gctx.build_get_k(mctx_cur, il);
+    ggml_tensor * v = use_kv_cur ? v_cur : gctx.build_get_v(mctx_cur, il);
 
     ggml_tensor * cur = gctx.build_attn_mha(q, k, v, kq_b, kq_mask, kv_rows, sinks, v_mla, 0, kq_scale, il);
     cur = build_attn_scale_kv_output(ctx0, mctx_cur, cur, il);
