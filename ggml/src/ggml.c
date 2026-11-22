@@ -1100,6 +1100,7 @@ static const char * GGML_OP_NAME[GGML_OP_COUNT] = {
     "DSV4_HC_POST",
     "DSV4_HC_MIX",
     "CLIP_ROWS",
+    "RES_MIX",
     "TOP_K_MASK",
 
     "UNARY",
@@ -1120,7 +1121,7 @@ static const char * GGML_OP_NAME[GGML_OP_COUNT] = {
     "SLEEP",
 };
 
-static_assert(GGML_OP_COUNT == 102, "GGML_OP_COUNT != 102");
+static_assert(GGML_OP_COUNT == 103, "GGML_OP_COUNT != 103");
 
 static const char * GGML_OP_SYMBOL[GGML_OP_COUNT] = {
     "none",
@@ -1217,6 +1218,7 @@ static const char * GGML_OP_SYMBOL[GGML_OP_COUNT] = {
     "dsv4_hc_post(x, residual, post, comb)",
     "dsv4_hc_mix(x, w_norm, w_down, w_inject, w_up)",
     "clip_rows(a, scale)",
+    "res_mix(query, states...)",
     "top_k_mask(mask, top_k, score, blocks, extra)",
 
     "unary(x)",
@@ -1237,7 +1239,7 @@ static const char * GGML_OP_SYMBOL[GGML_OP_COUNT] = {
     "sleep(x)",
 };
 
-static_assert(GGML_OP_COUNT == 102, "GGML_OP_COUNT != 102");
+static_assert(GGML_OP_COUNT == 103, "GGML_OP_COUNT != 103");
 
 static_assert(GGML_OP_POOL_COUNT == 2, "GGML_OP_POOL_COUNT != 2");
 
@@ -6585,6 +6587,28 @@ struct ggml_tensor * ggml_clip_rows(
     result->op     = GGML_OP_CLIP_ROWS;
     result->src[0] = a;
     result->src[1] = scale;
+
+    return result;
+}
+
+// ggml_res_mix
+
+struct ggml_tensor * ggml_res_mix(
+        struct ggml_context * ctx,
+        struct ggml_tensor  * query,
+        struct ggml_tensor ** states,
+        int                   n_states) {
+    GGML_ASSERT(n_states >= 1 && n_states + 1 <= GGML_MAX_SRC);
+    GGML_ASSERT(query->type == GGML_TYPE_F32 && query->ne[0] == states[0]->ne[0]);
+
+    struct ggml_tensor * result = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, query->ne[0], query->ne[1], states[0]->ne[1]);
+
+    result->op     = GGML_OP_RES_MIX;
+    result->src[0] = query;
+    for (int i = 0; i < n_states; ++i) {
+        GGML_ASSERT(states[i]->type == GGML_TYPE_F32 && ggml_are_same_shape(states[i], states[0]));
+        result->src[i + 1] = states[i];
+    }
 
     return result;
 }

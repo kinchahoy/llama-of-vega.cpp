@@ -416,6 +416,7 @@ extern "C" {
         GGML_OP_DSV4_HC_POST,
         GGML_OP_DSV4_HC_MIX,
         GGML_OP_CLIP_ROWS,
+        GGML_OP_RES_MIX,
         GGML_OP_TOP_K_MASK,
 
         GGML_OP_UNARY,
@@ -2509,6 +2510,15 @@ extern "C" {
             struct ggml_tensor  * a,
             struct ggml_tensor  * scale,
             float                 threshold);
+
+    // res_mix: query [n_embd, n_q], states n_states x [n_embd, n_tokens] -> [n_embd, n_q, n_tokens]
+    //   softmax over the states of dot(rms_norm(state), query)/sqrt(n_embd), then the weighted sum of the normalized states
+    //
+    GGML_API struct ggml_tensor * ggml_res_mix(
+            struct ggml_context * ctx,
+            struct ggml_tensor  * query,
+            struct ggml_tensor ** states,
+            int                   n_states);
 
     // hc_post: x [n_embd, n_tokens], residual [n_embd, hc, n_tokens],
     //          post [hc, n_tokens], comb [dst_hc, src_hc, n_tokens]

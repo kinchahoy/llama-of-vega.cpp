@@ -12563,6 +12563,61 @@ void ggml_compute_forward_clip_rows(
     }
 }
 
+// ggml_compute_forward_res_mix
+
+void ggml_compute_forward_res_mix(
+        const ggml_compute_params * params,
+        ggml_tensor * dst) {
+    const ggml_tensor * query = dst->src[0];
+
+    const int64_t n_embd   = query->ne[0];
+    const int64_t n_q      = query->ne[1];
+    const int64_t n_tokens = dst->ne[2];
+    int n_states = 0;
+    while (n_states + 1 < GGML_MAX_SRC && dst->src[n_states + 1]) {
+        n_states++;
+    }
+
+    for (int64_t ir = params->ith; ir < n_q*n_tokens; ir += params->nth) {
+        const int64_t q = ir % n_q;
+        const int64_t t = ir / n_q;
+        const float * qv = (const float *) query->data + q*n_embd;
+
+        float score[GGML_MAX_SRC];
+        float inv_rms[GGML_MAX_SRC];
+        float max_s = -INFINITY;
+        for (int s = 0; s < n_states; ++s) {
+            const float * x = (const float *) dst->src[s + 1]->data + t*n_embd;
+            float ss  = 0.0f;
+            float dot = 0.0f;
+            for (int64_t i = 0; i < n_embd; ++i) {
+                ss  += x[i]*x[i];
+                dot += x[i]*qv[i];
+            }
+            inv_rms[s] = 1.0f/sqrtf(ss/n_embd + 1e-6f);
+            score[s]   = dot*inv_rms[s]/sqrtf((float) n_embd);
+            max_s = std::max(max_s, score[s]);
+        }
+        float sum = 0.0f;
+        for (int s = 0; s < n_states; ++s) {
+            score[s] = expf(score[s] - max_s);
+            sum += score[s];
+        }
+        for (int s = 0; s < n_states; ++s) {
+            score[s] = score[s]/sum*inv_rms[s];
+        }
+
+        float * y = (float *) dst->data + (t*n_q + q)*n_embd;
+        for (int64_t i = 0; i < n_embd; ++i) {
+            float acc = 0.0f;
+            for (int s = 0; s < n_states; ++s) {
+                acc += score[s]*((const float *) dst->src[s + 1]->data)[t*n_embd + i];
+            }
+            y[i] = acc;
+        }
+    }
+}
+
 // ggml_compute_forward_dsv4_hc_mix
 
 // Q8_0 weights are dotted with the activation quantized to int8 per 32 values, like mul_mat does

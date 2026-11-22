@@ -4894,6 +4894,38 @@ struct test_clip_rows : public test_case {
     }
 };
 
+struct test_res_mix : public test_case {
+    const int64_t n_embd;
+    const int64_t n_states;
+    const int64_t n_q;
+    const int64_t n_tokens;
+
+    std::string op_desc(ggml_tensor * t) override {
+        GGML_UNUSED(t);
+        return "RES_MIX";
+    }
+
+    std::string vars() override {
+        return VARS_TO_STR4(n_embd, n_states, n_q, n_tokens);
+    }
+
+    test_res_mix(int64_t n_embd = 2304, int64_t n_states = 9, int64_t n_q = 3, int64_t n_tokens = 5)
+        : n_embd(n_embd), n_states(n_states), n_q(n_q), n_tokens(n_tokens) {}
+
+    ggml_tensor * build_graph(ggml_context * ctx) override {
+        ggml_tensor * query = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, n_embd, n_q);
+        ggml_set_name(query, "query");
+        std::vector<ggml_tensor *> states;
+        for (int64_t i = 0; i < n_states; ++i) {
+            states.push_back(ggml_new_tensor_2d(ctx, GGML_TYPE_F32, n_embd, n_tokens));
+            ggml_set_name(states.back(), ("state_" + std::to_string(i)).c_str());
+        }
+        ggml_tensor * out = ggml_res_mix(ctx, query, states.data(), (int) n_states);
+        ggml_set_name(out, "out");
+        return out;
+    }
+};
+
 struct test_dsv4_hc_mix : public test_dsv4_hc {
     const int64_t n_embd;
     const int64_t n_lo;
@@ -10969,6 +11001,11 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
         test_cases.emplace_back(new test_clip_rows(128, 32, nt, true));
         test_cases.emplace_back(new test_clip_rows(128, 8, nt, false));
         test_cases.emplace_back(new test_clip_rows(16, 32, nt, true));
+    }
+    for (int64_t nt : {1, 5, 512}) {
+        test_cases.emplace_back(new test_res_mix(2304, 9, 3, nt));
+        test_cases.emplace_back(new test_res_mix(2304, 2, 1, nt));
+        test_cases.emplace_back(new test_res_mix(100, 4, 4, nt));
     }
     for (int64_t nt : {1, 2, 3, 4, 5, 8}) {
         test_cases.emplace_back(new test_dsv4_hc_mix(512, 64, nt));

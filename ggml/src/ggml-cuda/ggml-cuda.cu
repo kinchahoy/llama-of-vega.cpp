@@ -87,6 +87,7 @@ static bool ggml_cuda_repack_fusion_glu_ok(const ggml_tensor * glu) {
 #include "ggml-cuda/gated_delta_net.cuh"
 #include "ggml-cuda/dsv4-hc.cuh"
 #include "ggml-cuda/clip-rows.cuh"
+#include "ggml-cuda/res-mix.cuh"
 #include "ggml-cuda/set.cuh"
 #include "ggml-cuda/set-rows.cuh"
 #include "ggml-cuda/pad_reflect_1d.cuh"
@@ -3535,6 +3536,9 @@ static bool ggml_cuda_compute_forward(ggml_backend_cuda_context & ctx, struct gg
             break;
         case GGML_OP_CLIP_ROWS:
             ggml_cuda_op_clip_rows(ctx, dst);
+            break;
+        case GGML_OP_RES_MIX:
+            ggml_cuda_op_res_mix(ctx, dst);
             break;
         case GGML_OP_DSV4_HC_POST:
             ggml_cuda_op_dsv4_hc_post(ctx, dst);
@@ -7448,6 +7452,17 @@ static bool ggml_backend_cuda_device_supports_op(ggml_backend_dev_t dev, const g
             return op->type == GGML_TYPE_F32 && op->src[0]->type == GGML_TYPE_F32 && ggml_is_contiguous(op->src[0]) &&
                 (op->src[1] == nullptr || (op->src[1]->type == GGML_TYPE_F32 && ggml_is_contiguous(op->src[1]))) &&
                 op->src[0]->ne[0] <= 1024;
+        case GGML_OP_RES_MIX: {
+            if (op->type != GGML_TYPE_F32 || op->src[0]->type != GGML_TYPE_F32 || !ggml_is_contiguous(op->src[0])) {
+                return false;
+            }
+            for (int i = 1; i < GGML_MAX_SRC && op->src[i]; ++i) {
+                if (op->src[i]->type != GGML_TYPE_F32 || !ggml_is_contiguous(op->src[i])) {
+                    return false;
+                }
+            }
+            return true;
+        }
         case GGML_OP_DSV4_HC_POST:
             return op->src[0]->type == GGML_TYPE_F32 && op->src[1]->type == GGML_TYPE_F32 &&
                 op->src[2]->type == GGML_TYPE_F32 && (op->src[3] == nullptr || op->src[3]->type == GGML_TYPE_F32) &&

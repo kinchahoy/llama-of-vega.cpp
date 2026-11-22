@@ -186,6 +186,23 @@ ggml_tensor * llama_model_inkling2::graph::clip(ggml_tensor * cur, ggml_tensor *
 
 // attention over the depth: mix the earlier block outputs and cur with learned queries
 ggml_tensor * llama_model_inkling2::graph::mix(const std::vector<ggml_tensor *> & blocks, ggml_tensor * cur, ggml_tensor * query) {
+    // LLAMA_INKLING_MIX_FUSED=0 restores the old chain
+    static const bool mix_fused = [] {
+        const char * env = getenv("LLAMA_INKLING_MIX_FUSED");
+        return env == nullptr || atoi(env) != 0;
+    }();
+    if (mix_fused && blocks.size() + 2 <= GGML_MAX_SRC && query->type == GGML_TYPE_F32 && ggml_is_contiguous(query)) {
+        std::vector<ggml_tensor *> all(blocks);
+        all.push_back(cur);
+        bool ok = true;
+        for (ggml_tensor * s : all) {
+            ok = ok && s->type == GGML_TYPE_F32 && ggml_is_contiguous(s) && s->ne[0] == n_embd && ggml_nelements(s) == n_embd*n_tokens;
+        }
+        if (ok) {
+            return ggml_res_mix(ctx0, query, all.data(), (int) all.size());
+        }
+    }
+
     ggml_tensor * states = ggml_reshape_3d(ctx0, cur, n_embd, 1, n_tokens);
     for (ggml_tensor * block : blocks) {
         states = ggml_concat(ctx0, ggml_reshape_3d(ctx0, block, n_embd, 1, n_tokens), states, 1);
