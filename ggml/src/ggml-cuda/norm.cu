@@ -929,6 +929,57 @@ static __global__ void add_rms_norm_mul_f32(
     }
 }
 
+#define ADD_RMS_SPLIT_BLOCK 256
+
+// split form, kernel 1: sum = a + b and one partial sum of squares per chunk
+static __global__ void add_rms_partial_f32(const float * a, const float * b, float * sum, float * part, const int ncols, const int n_chunks) {
+    const int64_t row = blockIdx.y;
+    const int     col = blockIdx.x*ADD_RMS_SPLIT_BLOCK + threadIdx.x;
+
+    __shared__ float s_sum[32];
+    float xi = 0.0f;
+    if (col < ncols) {
+        xi = a[row*ncols + col] + b[row*ncols + col];
+        sum[row*ncols + col] = xi;
+    }
+    const float tmp = block_reduce<block_reduce_method::SUM, ADD_RMS_SPLIT_BLOCK>(xi*xi, s_sum);
+    if (threadIdx.x == 0) {
+        part[row*n_chunks + blockIdx.x] = tmp;
+    }
+}
+
+// split form, kernel 2: inverse rms from the partials, then dst and the optional Q8_1 copy for this chunk
+static __global__ void add_rms_out_f32(
+        const float * sum, const float * part, const float * w, float * dst, block_q8_1 * q,
+        const int ncols, const int ncols_padded, const int n_chunks, const float eps) {
+    const int64_t row = blockIdx.y;
+    const int     col = blockIdx.x*ADD_RMS_SPLIT_BLOCK + threadIdx.x;
+
+    float tmp = 0.0f;
+    for (int k = 0; k < n_chunks; ++k) {
+        tmp += part[row*n_chunks + k];
+    }
+    const float scale = rsqrtf(tmp/ncols + eps);
+
+    float xi = 0.0f;
+    if (col < ncols) {
+        xi = scale * sum[row*ncols + col] * w[col];
+        dst[row*ncols + col] = xi;
+    }
+    if (q == nullptr) {
+        return;
+    }
+    block_q8_1 * qrow = q + row*(ncols_padded/QK8_1);
+    const float amax = warp_reduce_max<QK8_1>(fabsf(xi));
+    const float xsum = warp_reduce_sum<QK8_1>(xi);
+    const float d    = amax / 127.0f;
+    const int   iqs  = col % QK8_1;
+    qrow[col / QK8_1].qs[iqs] = amax == 0.0f ? 0 : roundf(xi / d);
+    if (iqs == 0) {
+        qrow[col / QK8_1].ds = make_half2(d, xsum);
+    }
+}
+
 bool ggml_cuda_add_rms_norm_mul_supported(const ggml_tensor * add, const ggml_tensor * rms_norm, const ggml_tensor * mul) {
     const ggml_tensor * w = mul->src[0] == rms_norm ? mul->src[1] : mul->src[0];
     if (rms_norm->src[0] != add || (mul->src[0] != rms_norm && mul->src[1] != rms_norm)) {
@@ -963,7 +1014,13 @@ void ggml_cuda_op_add_rms_norm_mul(ggml_backend_cuda_context & ctx, ggml_tensor 
     float       * dst_d = (float *) mul->data;
     cudaStream_t stream = ctx.stream();
 
-    if (ncols < 1024) {
+    if (nrows <= 8 && ncols >= 4096) {
+        const int n_chunks = (ncols + ADD_RMS_SPLIT_BLOCK - 1)/ADD_RMS_SPLIT_BLOCK;
+        const int n_out    = q ? ncols_padded/ADD_RMS_SPLIT_BLOCK : n_chunks;
+        ggml_cuda_pool_alloc<float> part(ctx.pool(), nrows*n_chunks);
+        add_rms_partial_f32<<<dim3(n_chunks, nrows), ADD_RMS_SPLIT_BLOCK, 0, stream>>>(a_d, b_d, sum_d, part.get(), ncols, n_chunks);
+        add_rms_out_f32<<<dim3(n_out, nrows), ADD_RMS_SPLIT_BLOCK, 0, stream>>>(sum_d, part.get(), w_d, dst_d, q, ncols, ncols_padded, n_chunks, eps);
+    } else if (ncols < 1024) {
         add_rms_norm_mul_f32<256><<<nrows, 256, 32*sizeof(float), stream>>>(a_d, b_d, sum_d, w_d, dst_d, q, ncols, ncols_padded, eps);
     } else {
         add_rms_norm_mul_f32<1024><<<nrows, 1024, 32*sizeof(float), stream>>>(a_d, b_d, sum_d, w_d, dst_d, q, ncols, ncols_padded, eps);
