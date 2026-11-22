@@ -1,6 +1,6 @@
 # Goals and Intent
 
-Owner-editable statement of *why* this fork exists and how agents should make tradeoffs. Read this before [PROCESS.md](PROCESS.md), [HARDWARE-CARD.md](HARDWARE-CARD.md), or [PERFORMANCE.md](PERFORMANCE.md). Do not treat individual rules in other docs as rigid laws when they conflict with the intent below; instead, flag the conflict or propose a deviation explicitly.
+Owner-editable statement of *why* this fork exists and how agents should make tradeoffs. Read this before [HARDWARE.md](HARDWARE.md), [PERFORMANCE.md](PERFORMANCE.md), or [MAINTENANCE.md](MAINTENANCE.md). Do not treat individual rules in other docs as rigid laws when they conflict with the intent below; instead, flag the conflict or propose a deviation explicitly.
 
 ## 1. Mission
 
@@ -40,7 +40,7 @@ Deliver the fastest possible local inference on our two older Radeon GPUs (**MI6
 
 - **Software-only for now**: Do not plan around physical hardware changes (such as moving the MI50 off chipset PCIe lanes) unless the owner reopens it.
 - **Server uptime & GPU hours**: Batch GPU validation into concise windows. Keep `llama-model-server` downtime short and batch GPU validation into brief windows (<=15-30 min). Exhaust zero-GPU-hour analysis (saved traces, hardware card math, upstream/external audits) before running the GPUs.
-- **Update the model, don't just log failures**: Every failed kernel or surprise measurement must update our quantitative model of these GPUs ([HARDWARE-CARD.md](HARDWARE-CARD.md)) -- bandwidth, occupancy, graph-node vs launch overhead, MI60 vs MI50 asymmetry (HBM streaming is ~equal at ~890-904 GB/s, while MI50 is ~21% slower in PP GEMM and ~20-40% slower in small kernels), and host/PCIe behavior. Do not discard a good route just because one naive implementation lost.
+- **Update the model, don't just log failures**: Every failed kernel or surprise measurement must update our quantitative model of these GPUs ([HARDWARE.md](HARDWARE.md)) -- bandwidth, occupancy, graph-node vs launch overhead, MI60 vs MI50 asymmetry (HBM streaming is ~equal at ~890-904 GB/s, while MI50 is ~21% slower in PP GEMM and ~20-40% slower in small kernels), and host/PCIe behavior. Do not discard a good route just because one naive implementation lost.
 
 ## 7. How Agents Should Propose Deviations
 
