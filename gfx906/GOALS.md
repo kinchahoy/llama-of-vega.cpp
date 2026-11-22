@@ -28,7 +28,7 @@ Deliver fast, high-fidelity local inference on dual legacy AMD **gfx906** GPUs (
 
 - **Speed wins first; clean up second.** Capture real performance gains first, then refactor to simplify upstream catch-up merges and eventual upstreaming to `llama.cpp` main.
 - **Pruning rule of thumb**: Worth trading a tiny gain (e.g. ~0.3% PP) to remove ~200 lines of custom code, or pruning dead/slow fallbacks, without sacrificing meaningful speedups solely for line count. Weigh edge cases against ongoing upstream-merge maintenance cost.
-- **Borrow freely**: Check upstream `llama.cpp`, `unslothai/llama.cpp`, `mixa3607/ML-gfx906` / `mx-llama.cpp`, `thejacer/slop.cpp`, `alex4300/llama.cpp-gfx906-opt`, `milpster/gfx906-llama-cpp`, and `Niko1221/Strata` for ideas or reference kernels before building from scratch.
+- **Borrow freely**: Check upstream `llama.cpp`, `unslothai/llama.cpp`, `mixa3607/ML-gfx906` / `mx-llama.cpp`, `thejacer/slop.cpp`, `alex4300/llama.cpp-gfx906-opt`, `milpster/gfx906-llama-cpp`, `iacopPBK/gfx906-quartz`, and `Niko1221/Strata` for ideas or reference kernels before building from scratch.
 
 ## 5. Accuracy and Quality
 
