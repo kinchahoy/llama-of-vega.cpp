@@ -9,15 +9,40 @@ sources:
 
 > Measured 2026-11-10 on tree `0f7ce1b04`. It predates B1, the later F2 variants, the Inkling work and the merges since.
 > Per-launch times in it are `rocprofv3` times (profiler adds about 1.2 us per kernel); the launch cost in the app is about 2.2 us.
-> Newer measured facts and their grades: [What we know](PERFORMANCE.md#what-we-know).
+> Newer measured facts and their grades: [The model](PERFORMANCE.md#the-model).
 
 # Token budget: where one decode token and one prompt ubatch go
 
-One decode token (TG) and one prompt ubatch (PP), split into model steps, side by side for the target models on two gfx906 GPUs (`-sm tensor`, host-staged AllReduce). Each column comes from one `rocprofv3` trace of llama-bench plus an unprofiled llama-bench run, cut into steps by [token_budget.py](scripts/token_budget.py). Use it to see which step is worth attacking before you start an experiment. For model limits and ideas see [PERFORMANCE.md](PERFORMANCE.md#what-we-know).
+One decode token (TG) and one prompt ubatch (PP), split into model steps, side by side for the target models on two gfx906 GPUs (`-sm tensor`, host-staged AllReduce). Each column comes from one `rocprofv3` trace of llama-bench plus an unprofiled llama-bench run, cut into steps by [token_budget.py](scripts/token_budget.py). Use it to see which step is worth attacking before you start an experiment. For model limits and ideas see [PERFORMANCE.md](PERFORMANCE.md#the-model).
 
 This is a growing record. The source of truth is two append-only CSV files, [token-budget-columns.csv](token-budget-columns.csv) (one row per datapoint) and [token-budget-steps.csv](token-budget-steps.csv) (one row per datapoint, step and GPU). The tables between `<!-- tb:... -->` markers are generated from them; never edit their numbers by hand (see [How to update](#tb-update)).
 
 Best viewed in VS Code with the MyST-Markdown extension (executablebooks.myst-highlight / the MyST VS Code extension); GitHub shows the same tables, minus the dropdowns.
+
+## How to read this with the model
+
+This file is stage 2 data in the [process](PROCESS.md): saved traces, cut into steps. Its tables and the two csv files are unchanged. The cost model and its constants are in [HARDWARE-CARD.md](HARDWARE-CARD.md); the current per-model view is in [The model](PERFORMANCE.md#the-model).
+
+Mapping of its columns to the three kernel classes of `vr/scripts/kernel_budget.py` (floor, one-block, work). The csv files hold per-step totals, not per-kernel launch geometry, so the class of a single kernel cannot be read from them. The mapping is by step type and is approximate:
+
+| Column or step | Class it mostly holds | How to use it |
+| --- | --- | --- |
+| kernels per token (`kernels_per_unit`) | floor: each launch costs about 2.2 us in the app | launches x 2.2 us is the launch floor (card constant) |
+| small-kernel steps (glue, q8_1 quantize, norms, recurrent chain kernels, about 4 us per call) | floor, and one-block where a kernel reduces a whole row | run `kernel_budget.py` on a new trace to separate them by geometry |
+| mat-vec and GEMM steps (attention, FFN, input and output projections) | work: compare bytes with the mat-vec bandwidth on the card | roofline check |
+| AllReduce rows (exchange and wait) | work across two GPUs | cross-GPU exchange constant (Q3 on the card, open) |
+| idle-before | none: GPU time with no kernel | see the retired host-gap attribution below |
+
+Times in this file are profiler times. `rocprofv3` adds about 1.2 us to every kernel and shows a 4.2 us floor; a launch costs about 2.2 us in the app. Subtract about 1.2 us per kernel before comparing with an unprofiled time.
+
+Conclusions of this file that the measurements of 2026-11-21 and 2026-11-22 changed (grades and details in [Retired claims](PERFORMANCE.md#retired-claims)):
+
+- The host-gap attribution (idle-before charged to the host, "No dispatch on either GPU: about 4.3 ms"): steady-state generation is 98% GPU-busy with kernels back to back on Inkling 2 Mini and 96-99% on 27B (B, one trace each); the profiled gap was largely profiler cost. Flash Next is 83-88% busy and its idle share is still unexplained.
+- Ceilings built on 4-5 us per removed launch: the app cost is about 2.2 us (4.2 us is the profiler floor), so those ceilings were about 2x high.
+- The profiled-slowdown ranges (21-45% in older text, 7-24% here): not reconciled; treat profiled ms as an upper bound.
+- Predates B1, the later F2 variants, the Inkling work and the merges; the `flash_attn` row of long-context columns predates the launch-bounds fix for Inkling decode attention.
+
+How to regenerate a budget today: for a ranked per-kernel work list with the three classes, run `python3 vr/scripts/kernel_budget.py TRACE_DIR N_TOKENS` on a `rocprofv3 --kernel-trace --stats` trace of `llama-bench -p 0 -n N_TOKENS -r 1`. For the older per-step format, use `vr/scripts/token_budget.py` as described in [How to update](#tb-update).
 
 (tb-tg)=
 

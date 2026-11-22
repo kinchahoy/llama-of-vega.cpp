@@ -12,7 +12,7 @@ The rebuild removed multi-stage TP (`-tps`) and the fork-only DeepSeek V4/V4.1, 
 
 Use the normal checkout. The human first commits and pushes the reviewed current state to the personal fork, including any local work that must be kept. Confirm the push succeeded and start with a clean tracked working tree. Agents do not commit or push. Keep unrelated untracked files untouched.
 
-Keep the previous successful build in its original directory with all its shared libraries. Do not rebuild it, copy only its executable, or rename it: build paths can be embedded in library lookup. Set `BASE` to that build. Stable names: `build-current` and `build-previous` are symlinks in the repo root (2026-11-21: `build-inkling-final-20261121` from 0ba4be7f1 (upstream e6d624b9a merged) and `build-u1sort-20261121`); after accepting a candidate, point `build-previous` at the old current and `build-current` at the candidate with `ln -sfn`. Never rename a build directory itself. Build each candidate in a new directory and keep the last two successful builds for quick comparisons. After acceptance, that candidate becomes the next merge's baseline. Record its path and source identity with the results.
+Keep the previous successful build in its original directory with all its shared libraries. Do not rebuild it, copy only its executable, or rename it: build paths can be embedded in library lookup. Set `BASE` to that build. Stable names: `build-current` and `build-previous` are symlinks in the repo root (2026-11-21: `build-final-20261122` from ae32e5e58 (upstream e6d624b9a merged) and `build-u1sort-20261121`); after accepting a candidate, point `build-previous` at the old current and `build-current` at the candidate with `ln -sfn`. Never rename a build directory itself. Build each candidate in a new directory and keep the last two successful builds for quick comparisons. After acceptance, that candidate becomes the next merge's baseline. Record its path and source identity with the results.
 
 Run from the repository root in Bash, keeping these variables for the later steps:
 
@@ -56,11 +56,17 @@ Reconcile loader/converter/tensor identifiers and graph/memory callers together.
 
 ## One final validation pass
 
-Finish the merge and fixes before building. Run one final pass; repeat only affected checks if something fails or subsequent code changes affect the result. Intermediate checks are for diagnosing a specific problem.
+The after-merge rule from the [process](PROCESS.md#after-an-upstream-merge): static diff first, then the one end-to-end comparison that AGENTS.md requires, then only the checks of features that the diff affects. Finish the merge and fixes before building. Repeat only affected checks if something fails or later code changes affect the result. Detailed evidence is read only for affected features ([feature index](IMPROVEMENTS.md#merge-maintenance-index)).
 
-Check staged and unstaged source diffs with `git diff --check` and `git diff --cached --check`, excluding generated patches and archives. Require no entries from `git ls-files -u` and inspect runtime source for conflict markers. Confirm HIP still compiles the default host-staged AllReduce path without an environment switch.
+### 1. Static diff, no GPU
 
-Configure and build once with the existing comparison flags. Leave `BASE` untouched.
+- Check staged and unstaged source diffs with `git diff --check` and `git diff --cached --check`, excluding generated patches and archives. Require no entries from `git ls-files -u` and inspect runtime source for conflict markers.
+- Diff the graph builders and the kernel geometry between the pre-merge commit and the merged tree: changed or new ops, launch bounds, block and grid sizes, shared memory, op fusion conditions. Predict from the [hardware card](HARDWARE-CARD.md) whether any kernel cost changes. List the features that the diff touches; only those get checks below.
+- Confirm HIP still compiles the default host-staged AllReduce path without an environment switch: `ggml/src/ggml-cuda/allreduce.cu` must compile the host-staged path for HIP, and its pipeline must not need `GGML_CUDA_TP_OVERLAP=1` for the normal configuration (AGENTS.md). Excluding HIP from it cost 21% PP and 38% TG on 2026-09-29.
+
+### 2. Build once
+
+Configure and build once in a new directory with the existing comparison flags. Leave `BASE` untouched.
 
 ```bash
 source $THEROCK_ENV
@@ -89,29 +95,13 @@ sha256sum "$BASE/bin/llama-bench" "$CAND/bin/llama-bench" > "$OUT/binaries.sha25
 ldd "$BASE/bin/llama-bench" > "$OUT/baseline-libraries.txt"
 ldd "$CAND/bin/llama-bench" > "$OUT/candidate-libraries.txt"
 unset GGML_CUDA_PEER_AR GGML_CUDA_TP_OVERLAP
-
-timeout --kill-after=5s 110s bash -eu -c '
-  "$1/bin/vr-test-gfx906-tp" --n 1 --check
-  "$1/bin/vr-test-gfx906-tp" --n 2048 --check
-' bash "$CAND" > "$OUT/tp.log" 2>&1
 ```
 
-Require exit zero and `check=pass` at both widths. These synthetic tests need no model or `-hf`: Q8 weights and F32 activations contain ones, the dot-product dimension is split across ROCm0/ROCm1, and the reduced output should be 17408. The harness executes the graph twice and checks only the first 16 output values of the final result, within an absolute tolerance of 2. It is a narrow matmul/reduction smoke test, not full model or speculative correctness coverage. Its `time_us` is not model PP/TG performance.
+### 3. The one end-to-end comparison
 
-The two TP checks share the existing two-minute runtime budget (110 seconds plus termination allowance). Timeout, missing GPUs or missing pass output means incomplete validation. Generation and benchmarks below require explicit user OK for the exact commands and combined time limit; no standing budget has been agreed. Do not download models or run full suites. Ask before longer checks or retries.
-
-After approval, run one short Qwen3.8-27B Q8_0 generation and matched PP2048/TG128 benchmarks. Both builds must resolve `-hf` to the same cached model files; keep the cache unchanged between runs. `--offline` prevents downloads. Use the same environment and no competing GPU workload.
+Rebuild and compare PP and TG with the pre-merge commit using identical `llama-bench` settings. It needs explicit user OK for the exact commands and combined time limit; no standing budget has been agreed. Do not download models. Both builds must resolve `-hf` to the same cached model files; keep the cache unchanged between runs. `--offline` prevents downloads. Use the same environment, no competing GPU workload, and start below 60 C.
 
 ```bash
-# llama-cli is chat-only and rejects -no-cnv; plain completion is llama-completion.
-timeout --kill-after=5s 110s "$CAND/bin/llama-completion" \
-  -hf unsloth/Qwen3.8-27B-GGUF:Q8_0 --offline \
-  -ngl 999 -dev ROCm0,ROCm1 -sm tensor -ts 1,1 -fa on \
-  -b 2048 -ub 2048 -c 4096 -t 20 -tb 20 \
-  --temp 0 --top-k 1 -s 42 -n 32 -no-cnv --simple-io --no-display-prompt \
-  -p 'The history of the printing press begins in' \
-  < /dev/null > "$OUT/generation.txt" 2> "$OUT/generation.log"
-# Continue only if generation succeeds; inspect the saved text.
 for label in baseline candidate; do
   if [ "$label" = baseline ]; then BUILD="$BASE"; else BUILD="$CAND"; fi
   timeout --kill-after=5s 110s "$BUILD/bin/llama-bench" \
@@ -127,13 +117,20 @@ for label in baseline candidate; do
 done
 ```
 
-These are three separate runtime invocations, each capped at 110 seconds plus 5 seconds to terminate; this is not a claim they fit the TP checks' two-minute budget. The benchmarks use warmup and one repetition. Require successful exits and complete JSON for both builds. One pair is a quick regression screen, not repeatability evidence. Add other models or targeted speculative/MoE checks only when the affected feature needs them and the user approves their budget.
+Each run is capped at 110 seconds plus 5 seconds to terminate. The benchmarks use warmup and one repetition. Require successful exits and complete JSON for both builds. One pair is a quick regression screen, not repeatability evidence. Report baseline and candidate PP2048 and TG128 in one table, with tokens/second and percentage change `(candidate / baseline - 1) * 100`. Compare measured results from this session; historical numbers are context, not a matched baseline. Mark skipped checks as not run and performance as not measured if either benchmark fails. Diagnose regressions before tuning; no automatic regression threshold has been agreed.
 
-Report baseline and candidate PP2048 and TG128 in one table, with tokens/second and percentage change `(candidate / baseline - 1) * 100`. Keep the JSON, stderr, generation text, TP pass/fail and source/build identities in `OUT`. Compare measured results from this session; historical numbers are context, not a matched baseline. Mark skipped checks as not run and performance as not measured if either benchmark fails. Diagnose regressions before tuning; no automatic regression threshold has been agreed.
+### 4. Affected features only
+
+Run these only when the static diff or the model predicts a change in the feature. They are not part of every merge. Each needs the user's OK for its budget.
+
+- AllReduce or tensor-split code touched: the two TP smoke checks (about 110 seconds each, no model): `timeout --kill-after=5s 110s bash -eu -c '"$1/bin/vr-test-gfx906-tp" --n 1 --check; "$1/bin/vr-test-gfx906-tp" --n 2048 --check' bash "$CAND"`. Require exit zero and `check=pass` at both widths. It is a narrow matmul and reduction smoke test; its `time_us` is not model PP/TG.
+- Numerics or sampling touched: one short `llama-completion` generation with `--temp 0 --top-k 1 -s 42 -n 32 -no-cnv --simple-io --no-display-prompt` on the same model and settings as the benchmark; inspect the saved text. (`llama-cli` is chat-only and rejects `-no-cnv`.)
+- Flash attention, KV cache, memory or ubatch splitting, or server slots touched: the multi-user check below.
+- Another model, speculative or MoE code touched: that model's targeted check, with its budget approved.
 
 ### Multi-user check (unified KV)
 
-The PP/TG pair above is one sequence. The serving presets run 3-4 users in one unified KV pool, where attention over the shared pool (kv_rows, MTP rollback with several slots, KV cell placement) behaves differently. Run this check before pushing a merge or a change that touches flash attention, the KV cache, memory/ubatch splitting or server slots. It needs `llama-batched-bench` in both builds and about 20 minutes (4 runs; each waits until both GPU junctions are below 60C, since the GPUs throttle under sustained load):
+The PP/TG pair above is one sequence. The serving presets run 3-4 users in one unified KV pool, where attention over the shared pool (kv_rows, MTP rollback with several slots, KV cell placement) behaves differently. Run this check only before pushing a merge or a change that touches flash attention, the KV cache, memory/ubatch splitting or server slots. It needs `llama-batched-bench` in both builds and about 20 minutes (4 runs; each waits until both GPU junctions are below 60C, since the GPUs throttle under sustained load):
 
 ```bash
 vr/scripts/bench_multiuser.sh "$OUT/multiuser" "$BASE" "$CAND"

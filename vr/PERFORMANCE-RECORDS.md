@@ -2,9 +2,66 @@
 
 Append-only log of dated runs, newest first. The live summary is in [PERFORMANCE.md](PERFORMANCE.md). Full commands, identities and raw data are in the linked [old-ignore](old-ignore/README.md) folders.
 
+## Record format
+
+Add each run as a dated record, newest first, below this section. Keep it short. Put raw files, including generated text, in `vr/old-ignore/<date>/<name>/` and link them. Existing records are not edited.
+
+Standard settings (a record names only what differs): both GPUs, all layers offloaded, `-sm tensor -ts 1/1 -fa on`, build flags from the [catch-up guide](how-to-catchup.md#one-final-validation-pass), no env knobs. 27B: `-b/-ub 2048/2048 -t 20` (the 2026-11-21 runs used `-ub 512`), F16 KV; llama-bench PP2048/TG128. Flash Next: `-b/-ub 1024/512`, F16 KV. Do not quantize the KV cache (user rule, 2026-11-06); records before that date and the 2026-11-06 8K rows used Q8_0 KV.
+
+```markdown
+### YYYY-MM-DD short title
+
+Purpose in one sentence. Kind: regression screen | A/B experiment | profile.
+
+- Source: `<commit>`; baseline `<commit or build_commit>`.
+- Model: `<quant>` rev `<12 chars>`; draft `<file>` if any.
+- Settings: standard 27B | standard Flash Next, plus what differs.
+- Workload: standard, or what differs; repeats and order (e.g. r3 alternating).
+- Predicted (from the card): the predicted saving in ms per token with its arithmetic.
+- Measured: the measured saving per kernel (trace) and end to end, with grade.
+- Prediction error and what it changed on the card: error in percent; "none" if inside about 20%; otherwise the constant or curve updated in HARDWARE-CARD.md.
+
+| Build | Mode | PP t/s | TG t/s | Change | Accept | Output |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| baseline | MTP2 | 514.0 | 60.7 | - | 2.6/3 | sha `ab12...` |
+| candidate | MTP2 | 516.2 | 61.0 | +0.5% | 2.6/3 | same |
+
+Verdict: one sentence, with a grade. Not covered: what was not run. Raw: [link](old-ignore/README.md).
+```
+
+Change is `(candidate / baseline - 1) * 100` on the same row type. Write `-` for not measured. Output is the sha (first 12 hex) of the generated text without the CLI banner, or "same" / "differs after N bytes". Accept is mean accepted tokens per draft step over draft size. Update [Current numbers](PERFORMANCE.md#current-numbers) from a record that used the current source. The three prediction fields come from the [process](PROCESS.md#pre-registration-template); the card is [HARDWARE-CARD.md](HARDWARE-CARD.md). Records written before 2026-11-22 have no prediction fields.
+
+## Records
+
+
+### 2026-11-22 decode attention occupancy, two-launch reductions, hardware card
+
+In plain words: Inkling 2 Mini now keeps its speed at long context (4K context 38.2 to 43.1 t/s, 16K 33.5 to 40.5 t/s), 27B gets its first kernel gain in three weeks (+1.6% generation), and the hardware constants behind these changes are measured and written down. Code: `efb85a1a5` (`flash_attn_ext_vec` launch bounds (128, 4) on HIP), `ae32e5e58` (two-launch `res_mix` and `add_rms_norm_mul`). Old build `build-inkling-final-20261121` (`0ba4be7f1`), new build `build-final-20261122` (`ae32e5e58`). `llama-bench -r 2`, order old, new, new, old, each run started below 50C; raw data in `build-final-20261122/validation/final/`, script [final_validation_3.sh](investigation-notes/2026-11-22-hardware-card/final_validation_3.sh).
+
+| Model | Config | PP2048 old | PP2048 new | TG128 old | TG128 new |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 27B Q8_0 | 2 GPUs, `-sm tensor`, ub 512, two rounds (4 runs each) | 614.7 | 614.0 (-0.1%) | 37.35 | 37.96 (+1.6%) |
+| Flash Next UD-IQ3_XXS | 2 GPUs, `-sm tensor`, ub 512 | 655.9 | 651.0 (-0.8%) | 50.28 | 50.46 (+0.4%) |
+| Inkling 2 Mini NVFP4 + Q8_0 | ROCm0, ub 512 | 836.0 | 835.7 | 45.94 | 46.97 (+2.2%) |
+| Inkling 2 Mini IQ4_NL | ROCm0, ub 512 (1 run each) | 880.2 | 878.6 | 47.79 | 48.98 (+2.5%) |
+
+27B TG, every run: old 37.54, 37.22, 37.41, 37.24; new 38.02, 37.90, 38.06, 37.87. The first, hot measurement of this change gave +2.9%; the cool alternated one gives +1.6%. Flash Next differences are inside its noise.
+
+Generation at depth, Inkling 2 Mini NVFP4, `llama-batched-bench -npl 1 -ub 2048`: 4096-token context TG 38.25, 38.13 old; 43.19, 43.05 new (+12.9%, alternated). 16384-token context 33.50 old, 40.53 new (+21%, one run each). PP at 4096 moved between 746 and 819 t/s across the four runs with no relation to the build (not explained).
+
+Predicted (from the card) / measured:
+- `flash_attn_ext_vec` at 4K context: predicted about 70 us per call from the one-block rule, traced 85.8 us. The cost was right and the mechanism was wrong: the kernel already split the keys over blocks; it used more than 128 VGPRs, so 2 blocks fit per compute unit and a call ran in about three rounds. Card change: the occupancy formula is now measured (HARDWARE-CARD.md).
+- Two-launch `res_mix_f32`: predicted about 5.4 us for the pair (7.8 us in a trace), traced 17.0 to 9.5 us. Two-launch `add_rms_norm_mul_f32`: predicted about 7.8 us in a trace, traced 11.37 to 9.05 us. Both go the predicted way and stop short; block size was not tuned (worklist BA-5).
+
+Checks: `test-backend-ops` on ROCm0: MUL_MAT 2727/2727, MUL_MAT_ID 1162/1162, FLASH_ATTN_EXT 4420/4420, FLASH_ATTN_EXT_BANDED 71/71, RMS_NORM 121/121, ADD_RMS_NORM_MUL 28/28, RES_MIX 9/9, LOOP_GATE 3/3, RMS_NORM_CAT 6/6, CLIP_ROWS 9/9, SCONV_RES 12/12, DSV4_HC_MIX 12/12. Greedy text old vs new, 48 tokens: 27B and Flash Next byte-identical; Inkling NVFP4 equal for 88 of 213 bytes (this model moves with rounding, see the model section of PERFORMANCE.md). CPU check ends without an assert. Server with NVFP4 and mmproj: text TG 37.9, image request PP 461.2, TG 36.7, server stays up.
+
+Hardware calibration, one time, about 8 GPU-minutes, no model loads (B): occupancy formula, streaming efficiency by geometry (peak 891 / 904 GB/s; 3.5 MB costs 5.0 us at best), host-staged exchange (duplex about 17 us + bytes / 3.46 GB/s, floor 25 to 41 us). Values and tables: [HARDWARE-CARD.md](HARDWARE-CARD.md).
+
+Tried, inside noise, not kept: four variants of the Flash Next `dsv4_hc_mix` kernels ([patches and theory](old-ignore/2026-11-22/hc-mix-variants/README.md)); three one-block rewrites of `add_rms_norm_mul` ([note](old-ignore/2026-11-22/add-rms-norm-variants/README.md)), superseded by the two-launch form above.
+
 ### 2026-11-21 Inkling 2 Mini, late: NVFP4 repacked experts, banded prefill attention, faster mix kernels
 
-In plain words: the exact NVFP4 file now runs at 836 t/s prompt and 45.8 t/s generation on one GPU (490.8 / 30.5 this afternoon), close to the IQ4_NL file, and long prompts need 5.5 GB less memory. 27B and Flash Next did not change. Code on top of the record below: `06aa25f25` + `d37d86dd7` + `2162c74dd` (banded relative-bias attention, port of unsloth #386 plus a tile-kernel path for gfx906, default on for prefill), `a99a7930b` (wide-block `res_mix` / `rms_norm_cat`), `0ba4be7f1` (NVFP4 experts on the repacked path). Old build `build-u1sort-20261121` (`400989a0d`), new build `build-inkling-final-20261121` (`0ba4be7f1`). `llama-bench -r 2`, order old, new, new, old, below 60C; raw data in `build-inkling-final-20261121/validation/final/`, script [final_validation_2.sh](investigation-notes/2026-11-21-inkling2-mini/final_validation_2.sh). How the wins were found and what is left for each model: [launch-floor-playbook.md](launch-floor-playbook.md).
+In plain words: the exact NVFP4 file now runs at 836 t/s prompt and 45.8 t/s generation on one GPU (490.8 / 30.5 this afternoon), close to the IQ4_NL file, and long prompts need 5.5 GB less memory. 27B and Flash Next did not change. Code on top of the record below: `06aa25f25` + `d37d86dd7` + `2162c74dd` (banded relative-bias attention, port of unsloth #386 plus a tile-kernel path for gfx906, default on for prefill), `a99a7930b` (wide-block `res_mix` / `rms_norm_cat`), `0ba4be7f1` (NVFP4 experts on the repacked path). Old build `build-u1sort-20261121` (`400989a0d`), new build `build-inkling-final-20261121` (`0ba4be7f1`). `llama-bench -r 2`, order old, new, new, old, below 60C; raw data in `build-inkling-final-20261121/validation/final/`, script [final_validation_2.sh](investigation-notes/2026-11-21-inkling2-mini/final_validation_2.sh). How the wins were found and what is left for each model: [PROCESS.md](PROCESS.md).
 
 | Model | Config | PP2048 old | PP2048 new | TG128 old | TG128 new |
 | --- | --- | ---: | ---: | ---: | ---: |

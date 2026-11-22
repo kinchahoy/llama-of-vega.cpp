@@ -2,6 +2,8 @@
 
 Last reviewed: 2026-11-22. Statements here are background, grade D (assertion) unless a grade and a link to [PERFORMANCE.md](PERFORMANCE.md) are given.
 
+Measured constants (launch cost, one-block cost, bandwidth, noise) are on the [hardware card](HARDWARE-CARD.md); this guide is the cross-GPU comparison.
+
 A guide for judging an optimization from another project, organized by hardware feature. For each feature: what gfx906 (MI50/MI60, Vega 20, GCN 5) has, what RDNA4 (Radeon AI PRO R9700, gfx1201), RTX 3090 (Ampere, sm_86) and RTX 5090 (Blackwell, sm_120) have, and which tricks depend on it. Figures marked ~ are approximate spec-sheet values.
 
 | | MI50 / MI60 | R9700 | RTX 3090 | RTX 5090 |
@@ -62,7 +64,7 @@ A guide for judging an optimization from another project, organized by hardware 
 
 ## 8. Launch, synchronization and graphs
 
-- gfx906: a launch costs about 2.2 us in the app (B, see [What we know](PERFORMANCE.md#what-we-know)); HIP graphs work.
+- gfx906: a launch costs about 2.2 us in the app (B, see [The model](PERFORMANCE.md#the-model)); HIP graphs work.
 - Others: lower launch overhead on NVIDIA; CUDA graphs mature.
 - Depends on it: models with many small ops (MoE routing, hyper-connections, GDN).
 - On gfx906: fusion helped Inkling 2 Mini (TG 43.57 to 47.73 for one rewritten fused kernel, A); whole-token graph replay is in use (B). Avoiding per-ubatch host syncs is a hypothesis (D).
@@ -72,7 +74,7 @@ A guide for judging an optimization from another project, organized by hardware 
 - This board: no peer access, so AllReduce is host-staged over PCIe. ROCm0 is the MI60 (64 CUs, bus 03, CPU lanes); ROCm1 is the MI50 (60 CUs, bus 87, chipset lanes shared over DMI). The MI60 has 64 CUs against 60 and sits on CPU lanes. ROCm1 GEMM is 21% slower in PP but mat-vec only 1.1% slower in TG (B, [TOKEN-BUDGET.md](TOKEN-BUDGET.md)); put the hot work and the host uploads on ROCm0. `lspci` names the cards wrongly; check CUs with `rocminfo`. gfx906 supports xGMI bridges, but this rig doesn't have one.
 - Others: 3090 NVLink bridge or P2P; R9700/5090 PCIe P2P (vllm-radiance uses a custom P2P all-reduce).
 - Depends on it: custom P2P all-reduce, fine-grained tensor parallel, expert parallel traffic.
-- On gfx906 here: fewer, larger exchanges and overlap (slabs, duplex copies, parallel lanes). Uneven `-ts` did not help 27B TG: every split measured slower (A, see [What did not work](PERFORMANCE.md#what-did-not-work)). Quantized all-reduce is lossy, so we don't use it.
+- On gfx906 here: fewer, larger exchanges and overlap (slabs, duplex copies, parallel lanes). Uneven `-ts` did not help 27B TG: every split measured slower (A, see [Routes that lost](PERFORMANCE.md#routes-that-lost)). Quantized all-reduce is lossy, so we don't use it.
 
 ## Your RTX 3090 as a target
 
