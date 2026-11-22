@@ -199,6 +199,27 @@ static __global__ void repack_iq4nl_kernel(
     }
 }
 
+// Device-side NVFP4 repack, one thread per 32-value group: canonical block_nvfp4 (36 B: 4 UE4M3 scales, 32 nibble bytes) to the paired nibble row and two f16 scales.
+static __global__ void repack_nvfp4_kernel(
+        const uint8_t * __restrict__ src, uint8_t * __restrict__ dst,
+        const int64_t ne1, const int64_t n_blocks, const int64_t qs_str,
+        const int64_t qs_len, const int64_t src_stride, const int64_t dst_stride,
+        const int64_t total) {
+    for (int64_t i = (int64_t) blockIdx.x * blockDim.x + threadIdx.x;
+         i < total; i += (int64_t) gridDim.x * blockDim.x) {
+        const int64_t blk = i % n_blocks;
+        const int64_t row = (i / n_blocks) % ne1;
+        const int64_t e   = i / (n_blocks * ne1);
+
+        const uint8_t * sb = src + e * src_stride + (row * (n_blocks / 2) + blk / 2) * 36;
+        const int h = (int) (blk & 1);
+        rp_nvfp4_pack_nibbles(sb + 4 + 16 * h, sb + 4 + 16 * h + 8, dst + e * dst_stride + row * qs_str + blk * 16);
+        __half * d_d = reinterpret_cast<__half *>(dst + e * dst_stride + qs_len + (row * n_blocks + blk) * 4);
+        d_d[0] = __float2half(ggml_cuda_ue4m3_to_fp32(sb[2 * h]));
+        d_d[1] = __float2half(ggml_cuda_ue4m3_to_fp32(sb[2 * h + 1]));
+    }
+}
+
 // Device-side Q6_K repack, one thread per 32-value sub-block: the host converter's de-interleave, lows on the de-aliased row stride, highs, scale pair, and the f16 d plane written by the sub-block that owns k == 0 of its super-block.
 static __global__ void repack_q6k_kernel(
         const uint8_t * __restrict__ src, uint8_t * __restrict__ dst,
@@ -478,6 +499,11 @@ void ggml_cuda_repack_set_tensor_async(int device, cudaStream_t stream,
                 break;
             case GGML_TYPE_IQ4_NL:
                 repack_iq4nl_kernel<<<grid, block, 0, stream>>>(
+                    st.scratch, (uint8_t *) tensor->data, ne1, n_blocks, qs_str,
+                    ne1 * qs_str, (int64_t) src_str, (int64_t) dst_str, n_out);
+                break;
+            case GGML_TYPE_NVFP4:
+                repack_nvfp4_kernel<<<grid, block, 0, stream>>>(
                     st.scratch, (uint8_t *) tensor->data, ne1, n_blocks, qs_str,
                     ne1 * qs_str, (int64_t) src_str, (int64_t) dst_str, n_out);
                 break;

@@ -18,6 +18,15 @@ static bool repack_convert_enabled() {
     return on;
 }
 
+// GGML_CUDA_REPACK_NVFP4=0 keeps NVFP4 expert tensors on the canonical kernels.
+static bool repack_nvfp4_enabled() {
+    static const bool on = [] {
+        const char * env = getenv("GGML_CUDA_REPACK_NVFP4");
+        return env == nullptr || atoi(env) != 0;
+    }();
+    return on;
+}
+
 bool ggml_cuda_repack_tensor_supported(const ggml_tensor * t) {
     // Views are never in repacked layout (the scale-plane offset needs the FULL ne1).
     if (t->view_src != nullptr) return false;
@@ -29,6 +38,10 @@ bool ggml_cuda_repack_tensor_supported(const ggml_tensor * t) {
         case GGML_TYPE_MXFP4:
         case GGML_TYPE_IQ4_NL: {
             return t->ne[0] % 32 == 0;
+        }
+        case GGML_TYPE_NVFP4: {
+            // MoE expert tensors only; dense NVFP4 stays on the canonical kernels
+            return t->ne[0] % 64 == 0 && ggml_n_dims(t) == 3 && repack_nvfp4_enabled();
         }
         case GGML_TYPE_Q6_K:
         case GGML_TYPE_Q4_K:
@@ -153,6 +166,26 @@ void repack_iq4nl_host(const block_iq4_nl * blocks, uint8_t * dst, const int64_t
             const block_iq4_nl * b = &blocks[row * n_blocks + blk];
             memcpy(dst + (size_t) row * qs_str + (size_t) blk * 16, b->qs, 16);
             memcpy(dst + qs_len + (size_t)(row * n_blocks + blk) * 2, &b->d, 2);
+        }
+    }
+}
+
+// Host repack of one NVFP4 matrix: each 32-value group gets 16 nibble bytes (see rp_nvfp4_pack_nibbles) and two f16 scales, the UE4M3 values decoded exactly.
+void repack_nvfp4_host(const block_nvfp4 * blocks, uint8_t * dst, const int64_t ne0, const int64_t ne1) {
+    GGML_ASSERT(ne0 % 64 == 0);
+    const int64_t n_blocks = ne0 / 32;
+    const int64_t qs_str   = repack_qs_row_stride(GGML_TYPE_NVFP4, ne0);
+    const size_t  qs_len   = (size_t) ne1 * qs_str;
+
+    memset(dst, 0, qs_len + (size_t) ne1 * n_blocks * 4);
+
+    for (int64_t row = 0; row < ne1; row++) {
+        for (int64_t blk = 0; blk < n_blocks; blk++) {
+            const block_nvfp4 * b = &blocks[row * (n_blocks / 2) + blk / 2];
+            const int h = (int) (blk & 1);
+            rp_nvfp4_pack_nibbles(b->qs + 16 * h, b->qs + 16 * h + 8, dst + (size_t) row * qs_str + (size_t) blk * 16);
+            const ggml_fp16_t d2[2] = { ggml_fp32_to_fp16(ggml_ue4m3_to_fp32(b->d[2 * h])), ggml_fp32_to_fp16(ggml_ue4m3_to_fp32(b->d[2 * h + 1])) };
+            memcpy(dst + qs_len + (size_t)(row * n_blocks + blk) * 4, d2, 4);
         }
     }
 }
@@ -365,6 +398,9 @@ void repack_host(ggml_type type, const void * blocks, uint8_t * dst, const int64
             break;
         case GGML_TYPE_IQ4_NL:
             repack_iq4nl_host((const block_iq4_nl *) blocks, dst, ne0, ne1);
+            break;
+        case GGML_TYPE_NVFP4:
+            repack_nvfp4_host((const block_nvfp4 *) blocks, dst, ne0, ne1);
             break;
         case GGML_TYPE_Q6_K:
             repack_q6k_host((const block_q6_K *) blocks, dst, ne0, ne1);

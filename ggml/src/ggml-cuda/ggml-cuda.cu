@@ -2709,6 +2709,9 @@ static const ggml_tensor * ggml_cuda_get_mul_mat_scale(const ggml_tensor * scale
     }
 
     const ggml_tensor * scale = scale_lhs_mm ? scale_node->src[1] : scale_node->src[0];
+    if (ggml_cuda_repack_mul_mat_should_fire(mm_node->src[0])) {
+        return nullptr;
+    }
     if ((mm_node->src[0]->type != GGML_TYPE_NVFP4 && mm_node->src[0]->type != GGML_TYPE_F8_E4M3) || scale_node->type != GGML_TYPE_F32 ||
             scale->type != GGML_TYPE_F32 || !ggml_is_contiguous(scale) || ggml_nelements(scale) != 1 ||
             !ggml_are_same_shape(scale_node, mm_node)) {
@@ -2730,6 +2733,9 @@ static const ggml_tensor * ggml_cuda_get_mul_mat_id_scale(const ggml_tensor * re
     }
 
     const ggml_tensor * scale = reshape->src[0];
+    if (ggml_cuda_repack_mul_mat_should_fire(mm_node->src[0])) {
+        return nullptr;
+    }
     if ((mm_node->src[0]->type != GGML_TYPE_NVFP4 && mm_node->src[0]->type != GGML_TYPE_F8_E4M3) || scale_node->type != GGML_TYPE_F32 ||
             scale->type != GGML_TYPE_F32 || !ggml_is_contiguous(scale) || ggml_nelements(scale) != mm_node->src[0]->ne[2] ||
             !ggml_are_same_shape(scale_node, mm_node)) {
@@ -6980,6 +6986,9 @@ static bool ggml_backend_cuda_device_supports_op(ggml_backend_dev_t dev, const g
             }
             if (op->op != GGML_OP_MUL_MAT && op->op != GGML_OP_MUL_MAT_ID) {
                 return false;
+            }
+            if (op->op == GGML_OP_MUL_MAT && op->src[0]->type == GGML_TYPE_NVFP4) {
+                return false;   // NVFP4 is repacked for MoE experts only
             }
             // Views of repacked weights are re-packed on the fly by the dispatch, so
             // accept a view whose base is supported too.
