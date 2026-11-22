@@ -60,6 +60,7 @@ struct llama_context {
     void sched_reserve();
 
     void synchronize();
+    void synchronize_sampling();
 
     const llama_model   & get_model()   const;
     const llama_cparams & get_cparams() const;
@@ -267,7 +268,7 @@ private:
 
     // Make sure enough space is available for outputs.
     // Returns max number of outputs for which space was reserved.
-    uint32_t output_reserve(int32_t n_outputs);
+    uint32_t output_reserve(int32_t n_outputs, bool sampled_ids = false, bool sampled_probs = false);
 
     void output_reorder();
 
@@ -439,6 +440,7 @@ private:
     std::vector<ggml_tensor *> layer_inp_tap;
 
     struct sampling_info {
+        bool outputs_ready = false;
         // !samplers.empty() to check if any samplers are active
         std::map<llama_seq_id, llama_sampler *> samplers;
 
