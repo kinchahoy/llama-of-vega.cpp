@@ -204,6 +204,29 @@ Config / Check / Aggregate rows (Type K from `history-retro.md`):
 
 ## Section 2: Detailed Dated Records (Newest First, 2026-11-22 -> 2026-08-12)
 
+### 2026-11-22 qwen27b server preset: multi-user check and ROCm0 out-of-memory fix
+
+Check the `qwen27b` preset as users run it (`serve.sh` router) at 1-4 users and long context. Kind: regression screen.
+
+- Source: `build-dspark-20261122` (b12743 `8681a98fb`). Model: `Qwen3.8-27B-Q8_0` + `mmproj-BF16` (HF snapshot `4af51b35`, same blob as `4ca72078`).
+- Settings: `[qwen27b]` preset as shipped (MTP2, `-np 4 -kvu -c 262144 -b/-ub 2048`, F16 KV). Client: `gfx906/scripts/bench_serve.py`, greedy, `n_predict 384`, single runs, start below 60 C.
+- Free VRAM after load (ROCm0 / ROCm1): router 0.93 / 2.08 GiB; direct server 1.09 / 2.24 GiB (same for `build-final-20261122`, so not a build regression). The old "about 1.3 GiB free per GPU" was stale.
+- Failure: through the router, a single 100K request hit `ROCm error: out of memory` in `hipGraphInstantiate` on ROCm0 when generation started. Short multi-user runs first stalled for seconds (FA workspace did not fit) and then recovered.
+- Fix: `no-mmproj-offload = true` (projector on CPU, images still accepted). ROCm0 free after load 0.93 -> 2.07 GiB; the 100K request then ran with ROCm0 >= 1.02 GiB free.
+- Backend sampling: `--spec-draft-backend-sampling` falls back to CPU under `-sm tensor` (log: "backend sampling not supported with SPLIT_MODE_TENSOR").
+
+| Scenario | Server | Per-user gen t/s | Total gen t/s | Accept | Notes |
+| --- | --- | --- | ---: | ---: | --- |
+| 1 user, 1.5K (3 prompts) | router | 55.6 / 61.3 / 58.4 | - | 0.59-0.71 | PP 552-574 |
+| 2 users, 1.5K | router | 38.3 / 41.0 | 80.6 | 0.68 | rerun after the first run stalled |
+| 4 users, 1.5K | router | 13.7-16.4 | 64.4 | 0.65 | PP ~430 total |
+| 4 users, 1.5K, temp 0.7 | direct | 13.4-15.8 | 62.3 | 0.52 | |
+| 1 user, 100K | router (fixed) | 37.6 | - | 0.71 | PP 347.6 (287 s) |
+| 2 users, 60K | direct | 1.9 / 26.1 | 53.2 (both generating) | 0.71 | user 0 crawled while user 1 prefilled |
+| 4 users, 50K | router (fixed) | 0.7 / 1.0 / 1.9 / 13.0 (whole request) | 43.2 (all generating, 20 s) | 0.72 | no OOM (ROCm0 >= 0.80 GiB free); prefills ran one at a time (first tokens at 123 / 282 / 462 / 640 s) and starved earlier users' decode |
+
+Verdict (B): 50-60 t/s holds for 1 user at short context; with 2-4 users it is the total, not per user. With several long prompts, serialized prefill (not kernel speed) dominates per-user latency (`SRV-PF` in PERFORMANCE.md). Not covered: Flash Next / Inkling presets.
+
 ### 2026-11-22 Inkling 2 DSpark block drafting (opt-in, not a speed gain yet)
 
 Block drafter for Inkling 2 Mini ported from open upstream PR ggml-org#32218 (`0a9105de4`, applied with no conflicts; one fork comment restored by hand). Nothing changes unless `--spec-type draft-dspark` is passed.

@@ -50,6 +50,7 @@ Keep HIP graphs on and RCCL off on boards without direct P2P (default host-stage
 | [server/models.ini](server/models.ini) | Validated unified-KV multi-user presets for `qwen27b`, `qwen27b-dflash`, `flashnext`, `flashnext-long`, `gemma4` |
 | [scripts/kernel_budget.py](scripts/kernel_budget.py) | Anchor-segmented `rocprofv3` SQLite analyzer: exact steady counts, Q1 occupancy, spill/under-fill/MI50-skew flags |
 | [scripts/bench_multiuser.sh](scripts/bench_multiuser.sh) | Cool-start `<60 C` 4x16K unified-KV + 4-way TG comparison for 27B and Flash Next |
+| [scripts/bench_serve.py](scripts/bench_serve.py) | N concurrent requests at a chosen context against a running `llama-server`: per-user and total generation t/s, draft acceptance |
 | [scripts/spec_accept.sh](scripts/spec_accept.sh) / [scripts/spec_accept.py](scripts/spec_accept.py) | 5-prompt `llama-server` speculative A/B reporting acceptance and ms/verify step |
 | [bench/q1_occupancy.cpp](bench/q1_occupancy.cpp) | Standalone microbench: VGPR/LDS/`__launch_bounds__` residency & dispatch rate |
 | [bench/q2_stream.cpp](bench/q2_stream.cpp) | Standalone microbench: HBM2 streaming GB/s by `(S, G, T)`, chunk vs run, FMA/dot4/F16 |

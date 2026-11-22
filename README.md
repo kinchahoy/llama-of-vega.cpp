@@ -41,6 +41,17 @@ Measured on **2x gfx906 (MI60 + MI50)**, TheRock ROCm (`10.3.0a20261110`), F16 K
 | **Inkling 2 Mini NVFP4 + Q8_0** | 1 GPU (MI60), `ub 512` (`ub 2048`) | **835.7** (1081) | **46.97** plain | +70% PP / +54% TG over initial merge; 4K/16K ctx TG: **43.12 / 40.53 t/s** (`flash_attn_ext_vec` `(128,4)` fix) |
 | **Inkling 2 Mini IQ4_NL** | 1 GPU (MI60), `ub 512` | **878.6** | **48.98** plain | +56% PP / +35% TG over initial merge |
 
+What to expect from the `llama-server` presets in [gfx906/server/models.ini](gfx906/server/models.ini) (generation t/s, F16 KV, single runs; see [Running & replicating the benchmarks](#running--replicating-the-benchmarks)):
+
+| Preset (`models.ini`) | Model & mode | 1 user, short prompt | 1 user, long context | 2-4 users at once | Measured |
+| --- | --- | ---: | ---: | --- | --- |
+| `qwen27b` | 27B Q8_0, MTP2, 262K pool / 4 slots | **56-61** | **37.6** @ 100K | 2 users ~39 each (~80 total); 4 users ~15 each (**~63 total**); 4 x 50K: fits, ~43 total once all generate, but prefills run one at a time and stall the others (last first token at 640 s) | 2026-11-22 |
+| `qwen27b-dflash` | 27B Q8_0, DFlash5, 32K / 1 slot | ~69-71 | long prompts pay a draft replay first | - | 2026-11 |
+| `flashnext` | Flash Next UD-IQ3_XXS, MTP3, 90K pool / 2 slots | ~58-65 | ~63 @ 100K (MTP3 bench) | - | 2026-11 |
+| `flashnext-long` | Flash Next UD-IQ3_XXS, no draft, 131K pool / 4 slots | ~48 | ~29 @ 120K | 4 users ~41 total | 2026-11-11 |
+
+The context size is one pool shared by all slots. While one user prefills a long prompt, the others' generation stalls until it ends. Inkling 2 Mini has no preset yet (single GPU, ~37-38 t/s through `llama-server`).
+
 ### Key additions over upstream `e6d624b9a`
 
 - **gfx906 repacked weight path (`ggml/src/ggml-cuda/q8_repack/`)**: 10 weight formats (`Q8_0`, `MXFP4`, `IQ4_NL`, `IQ4_XS`, `NVFP4`, `Q5_0`, `Q5_1`, `Q4_K`, `Q5_K`, `Q6_K`) tuned for GCN `v_dot4` without MFMA, plus narrow multi-column decode/verify mat-vec and fused gate+up+SwiGLU.
@@ -52,7 +63,7 @@ Measured on **2x gfx906 (MI60 + MI50)**, TheRock ROCm (`10.3.0a20261110`), F16 K
 ### Known caveats (2026-11-22)
 
 - Tested primarily on **gfx906 (MI50 / MI60)** with TheRock ROCm (`-DGGML_HIP_RCCL=OFF`). Wave32/NVIDIA/RDNA guards are in place for `DSV4_HC_MIX`, and `SGEMM_F32` is gated to GCN, but non-gfx906 targets are not regularly benchmarked here.
-- **Open high-leverage gaps** tracked in [gfx906/PERFORMANCE.md](gfx906/PERFORMANCE.md): long-context QSA tile skipping & 6:1 GQA head grouping (`G1`) at 32K-100K, the `>8` token cliff for 4-slot + speculative verify (`MU1(b)`), Inkling PP4K+ SWA ring-wrap fallback & `flash_attn_tile<128,128,64>` register spill, and Q8-reference KLD check for `SGEMM_F32` (`P4`).
+- **Open high-leverage gaps** tracked in [gfx906/PERFORMANCE.md](gfx906/PERFORMANCE.md): long-context QSA sparse gather (upstream PR #30370) & 6:1 GQA head grouping (`G1`) at 32K-100K, the `>8` token cliff for 4-slot + speculative verify (`MU1(b)`), Inkling PP4K+ SWA ring-wrap fallback & `flash_attn_tile<128,128,64>` register spill, and Q8-reference KLD check for `SGEMM_F32` (`P4`).
 
 ## ROCm / TheRock toolchain setup (gfx906)
 
@@ -129,6 +140,30 @@ _AI-drafted_
 - **[Niko1221/Strata](https://github.com/Niko1221/Strata)** - gfx906 IQ sign-handling word-op ideas (`S2`) and MoE roofline observations.
 - **[thejacer/slop.cpp](https://github.com/thejacer/slop.cpp)** - Inkling 2 Mini gfx906 tensor parallelism, load-time weight folding, fused ops, and async input-upload ring ideas.
 - **[alex4300/llama.cpp-gfx906-opt](https://github.com/alex4300/llama.cpp-gfx906-opt)** & **[milpster/gfx906-llama-cpp](https://github.com/milpster/gfx906-llama-cpp)** - gfx906 multi-column LDS-staged GEMV, GCN `DKQ=256` FlashAttention tuning, and Vega 20 MMQ/word-op ideas.
+
+## Running & replicating the benchmarks
+
+_AI-drafted_
+
+**Run the server.** [gfx906/server/serve.sh](gfx906/server/serve.sh) starts a router `llama-server` with the tuned presets in [gfx906/server/models.ini](gfx906/server/models.ini) (`qwen27b`, `flashnext`, `flashnext-long`, `gemma4`). Two optional gitignored files override it per machine: `gfx906/server/env.local.sh` (sourced first, e.g. your TheRock env) and `gfx906/server/models.local.ini` (copy of `models.ini` with local model paths).
+
+```bash
+BUILD=$PWD/build-gfx906 gfx906/server/serve.sh   # port 8080, loads qwen27b on startup
+curl http://127.0.0.1:8080/v1/chat/completions -d '{"model": "qwen27b", "messages": [{"role": "user", "content": "hi"}]}'
+```
+
+Pick a preset per request with `"model"`; only one model is loaded at a time. The context size in each preset is one unified KV pool shared by all slots (e.g. `qwen27b`: 262144 tokens across 4 slots).
+
+**Replicate the benchmark.** With the server running, [gfx906/scripts/bench_serve.py](gfx906/scripts/bench_serve.py) sends N concurrent requests built from repo text and prints per-user and total generation t/s and draft acceptance:
+
+```bash
+python3 -I gfx906/scripts/bench_serve.py --url http://127.0.0.1:8080 --model qwen27b --users 1 --ctx-tokens 1500
+python3 -I gfx906/scripts/bench_serve.py --url http://127.0.0.1:8080 --model qwen27b --users 4 --ctx-tokens 1500
+python3 -I gfx906/scripts/bench_serve.py --url http://127.0.0.1:8080 --model qwen27b --users 1 --ctx-tokens 100000
+python3 -I gfx906/scripts/bench_serve.py --url http://127.0.0.1:8080 --model qwen27b --users 4 --ctx-tokens 50000
+```
+
+Defaults are greedy with 384 generated tokens (`--temp 0.7` lowers MTP acceptance from ~0.68 to ~0.52). Start runs with both GPUs below 60 C; hot cards run 15-30% slower. Results are in the table above.
 
 ---
 
