@@ -1,18 +1,21 @@
 # gfx906 guide
 
-Local enhancements for two 32 GiB gfx906 GPUs (MI50/MI60), primarily tested with Qwen3.8-27B Q8_0. Built on [MX](https://github.com/mixa3607/mx-llama.cpp) and [iacopPBK's gfx906 work](https://github.com/iacopPBK/llama.cpp-gfx906); see [credits](IMPROVEMENTS.md#built-on). The active overlay targets official llama.cpp `36a0e2ffc0b352b774f8d71c43668b75b3061ef5` (upstream master on 2026-10-29). It is stage D of the [2026-10-29 rebuild](old-ignore/2026-10-29/rebuild/README.md): upstream plus cleanup and fixes, without pipeline stages, and with DeepSeek V4/V4.1, MiniMax-M2 and MiMo-2 back on upstream code. Source snapshots and benchmark identities are recorded in the performance reports.
+Local enhancements for two 32 GiB gfx906 GPUs (MI50/MI60), primarily tested with Qwen3.8-27B Q8_0. Built on [MX](https://github.com/mixa3607/mx-llama.cpp) and [iacopPBK's gfx906 work](https://github.com/iacopPBK/llama.cpp-gfx906); see [credits](IMPROVEMENTS.md#built-on). The active base is official llama.cpp `e6d624b9a` (merged 2026-11-21; the patch kit is for `46eb1742d`, see [catch up](how-to-catchup.md)). The code started as the [2026-10-29 rebuild](old-ignore/2026-10-29/rebuild/README.md): upstream plus cleanup and fixes, without pipeline stages, and with DeepSeek V4/V4.1, MiniMax-M2 and MiMo-2 on upstream code. Source snapshots and benchmark identities are recorded in the performance reports.
 
 | Guide | Purpose |
 | --- | --- |
 | [Improvements](IMPROVEMENTS.md) | What changed, why it helps, and what to revisit |
-| [Performance](PERFORMANCE.md) | Representative measurements and their limits |
+| [Performance](PERFORMANCE.md) | One live document: [current numbers](PERFORMANCE.md#current-numbers), [how to test](PERFORMANCE.md#how-to-test), [what we know](PERFORMANCE.md#what-we-know), [what worked](PERFORMANCE.md#what-worked), [what did not work](PERFORMANCE.md#what-did-not-work), [hypotheses](PERFORMANCE.md#hypotheses), [retired claims](PERFORMANCE.md#retired-claims) |
+| [Performance records](PERFORMANCE-RECORDS.md) | Append-only dated runs, newest first |
+| [Handoff](handoff.md) | State and next steps |
+| [Launch floor playbook](launch-floor-playbook.md) | Launch cost model, how to measure, how to add a fused op |
 | [Token budget](TOKEN-BUDGET.md) | Where one decode token goes, step by step, per model (profiled, growing record) |
 | [Hardware guide](HARDWARE-GUIDE.md) | What gfx906 can and cannot do, and which optimization tricks carry over from newer GPUs |
 | [Catch up](how-to-catchup.md) | Merge upstream and run one final validation pass; patch export is optional |
 | [Current patch kit](patches/llama-head-46eb1742d/README.md) | Replayable overlay for the `46eb1742d` base |
 | [Rebuild record, 2026-10-29](old-ignore/2026-10-29/rebuild/README.md) | Stages A-D, cumulative patches, results, status log and what was dropped |
 | [Benchmark scripts](scripts/README.md) | Build flags, llama-bench, output and MTP checks used for the rebuild |
-| [Server presets](server/models.ini) | `vr/server/serve.sh`: one llama-server (router mode) that switches between 27B (MTP2 or DFlash5), Flash Next (MTP3, 100K) and Gemma 4 per request (`"model": "qwen27b"`, `"qwen27b-dflash"`, `"flashnext"`, `"gemma4"`). Smoke-tested 2026-11-10: 51 / 61 / 48 / 32 t/s on a 96-token reply |
+| [Server presets](server/models.ini) | `vr/server/serve.sh`: one llama-server (router mode) that switches between 27B (MTP2 or DFlash5), Flash Next (MTP3, 100K) and Gemma 4 per request (`"model": "qwen27b"`, `"qwen27b-dflash"`, `"flashnext"`, `"gemma4"`). Smoke test, 2026-11-10 (not repeated after later merges; B, one 96-token reply each): 51 / 61 / 48 / 32 t/s |
 | [Previous patch kit](old-ignore/2026-10-29/patches/llama-head-418f905a4/README.md) | Historical overlay for the old `418f905a4` base |
 | [Historical records](old-ignore/README.md) | Dated benchmarks, experiments, and superseded workflows |
 
@@ -68,4 +71,4 @@ For weekly updates, first have the human commit and push the reviewed current st
 
 The focused TP harness is built with `-DLLAMA_BUILD_VR_EXPERIMENTS=ON`, target `vr-test-gfx906-tp`. The two TP checks share the catch-up guide's two-minute runtime budget after the final build. Longer checks and performance comparisons require explicit user OK. The final report includes TP results and baseline/candidate PP2048 and TG128 side by side. The worktree-based `catchup-script.sh` is optional.
 
-`master` is the final branch. Use `experiment/topic` for unfinished work and `archive/YYYY-MM-DD/topic` for retained historical branches; see the [cleanup record](old-ignore/2026-10-29/cleanup.md).
+`main` is the final branch. Use `experiment/topic` for unfinished work and `archive/YYYY-MM-DD/topic` for retained historical branches; see the [cleanup record](old-ignore/2026-10-29/cleanup.md).

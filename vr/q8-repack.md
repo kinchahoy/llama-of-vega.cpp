@@ -1,6 +1,6 @@
 # Repacked-weight path (AMD GCN)
 
-Custom matmul frontend for gfx906 (Q8_0, MXFP4, IQ4_NL, Q5_1, Q4_K, Q5_K, Q6_K). Weights are converted at upload into a
+Custom matmul frontend for gfx906 (Q8_0, MXFP4, IQ4_NL, Q5_1, Q4_K, Q5_K, Q6_K, plus Q5_0, IQ4_XS and NVFP4 added since 2026-11-06). Weights are converted at upload into a
 two-plane layout consumed by dp4a-based mat-vec and tiled GEMM kernels. Kernel
 bodies are guarded by `#if defined(GGML_USE_HIP) && defined(__gfx906__)`;
 elsewhere they emit `NO_DEVICE_CODE` stubs.

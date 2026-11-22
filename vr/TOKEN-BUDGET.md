@@ -7,9 +7,13 @@ sources:
   steps: vr/token-budget-steps.csv
 ---
 
+> Measured 2026-11-10 on tree `0f7ce1b04`. It predates B1, the later F2 variants, the Inkling work and the merges since.
+> Per-launch times in it are `rocprofv3` times (profiler adds about 1.2 us per kernel); the launch cost in the app is about 2.2 us.
+> Newer measured facts and their grades: [What we know](PERFORMANCE.md#what-we-know).
+
 # Token budget: where one decode token and one prompt ubatch go
 
-One decode token (TG) and one prompt ubatch (PP), split into model steps, side by side for the target models on two gfx906 GPUs (`-sm tensor`, host-staged AllReduce). Each column comes from one `rocprofv3` trace of llama-bench plus an unprofiled llama-bench run, cut into steps by [token_budget.py](scripts/token_budget.py). Use it to see which step is worth attacking before you start an experiment. For model limits and ideas see [PERFORMANCE.md](PERFORMANCE.md#what-limits-each-model).
+One decode token (TG) and one prompt ubatch (PP), split into model steps, side by side for the target models on two gfx906 GPUs (`-sm tensor`, host-staged AllReduce). Each column comes from one `rocprofv3` trace of llama-bench plus an unprofiled llama-bench run, cut into steps by [token_budget.py](scripts/token_budget.py). Use it to see which step is worth attacking before you start an experiment. For model limits and ideas see [PERFORMANCE.md](PERFORMANCE.md#what-we-know).
 
 This is a growing record. The source of truth is two append-only CSV files, [token-budget-columns.csv](token-budget-columns.csv) (one row per datapoint) and [token-budget-steps.csv](token-budget-steps.csv) (one row per datapoint, step and GPU). The tables between `<!-- tb:... -->` markers are generated from them; never edit their numbers by hand (see [How to update](#tb-update)).
 
@@ -321,4 +325,4 @@ Check the `ubatch cut` line in the output: the smallest boundary gap should be f
 
 :::
 
-Model kinds: `qwen35` (27B), `qwen4exp` (Flash Next; use `-b 1024 -ub 512`, depth 8192, `-m` the local UD-IQ3_XXS shard 1), `gemma4` (Gemma 4 31B, `-m` the cached Q8_0 file). A new model needs its own rules in `classify_segment` (TG) and `classify_pp` (PP) if its kernels do not fit the generic ones; check that no large time lands in the glue row. Each run takes 1-3 minutes plus the depth prefill; runs need the user's OK like any benchmark ([PERFORMANCE.md](PERFORMANCE.md#how-to-test-and-what-the-status-words-mean)).
+Model kinds: `qwen35` (27B), `qwen4exp` (Flash Next; use `-b 1024 -ub 512`, depth 8192, `-m` the local UD-IQ3_XXS shard 1), `gemma4` (Gemma 4 31B, `-m` the cached Q8_0 file). A new model needs its own rules in `classify_segment` (TG) and `classify_pp` (PP) if its kernels do not fit the generic ones; check that no large time lands in the glue row. Each run takes 1-3 minutes plus the depth prefill; runs need the user's OK like any benchmark ([PERFORMANCE.md](PERFORMANCE.md#how-to-test)).

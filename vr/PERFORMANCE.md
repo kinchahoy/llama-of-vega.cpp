@@ -1,72 +1,85 @@
 # Performance evidence
 
+The one live performance document. In plain words: what is fast now, how to test a change, what we know from measurement, what worked, what did not work, and which ideas are still worth testing. Old dated runs are in [PERFORMANCE-RECORDS.md](PERFORMANCE-RECORDS.md) and are not edited. Ids (B1, S2, A4, SP1, Q3, TB2 ...) are kept from the old idea ledger.
+
+Contents: [Current numbers](#current-numbers), [How to test](#how-to-test), [What we know](#what-we-know), [What worked](#what-worked), [What did not work](#what-did-not-work), [Hypotheses](#hypotheses), [Retired claims](#retired-claims).
+
 ## Current numbers
 
-Build: [catch-up guide](how-to-catchup.md#one-final-validation-pass) flags, TheRock ROCm on two gfx906 (MI60 + MI50). Settings: [standard](#record-format) unless noted. The source column says which tree each row measured.
+2026-11-21 final run, two builds alternated: old `build-u1sort-20261121` (`400989a0d`) and new `build-inkling-final-20261121` (`0ba4be7f1`). `llama-bench -r 2`, order old, new, new, old, start below 60C, `-ub 512`. Cells show old / new. Raw data in `build-inkling-final-20261121/validation/final/` (the builds are not in every worktree). Record: [2026-11-21 late][rec-1121-late].
 
-| Model | Mode | PP2048 | TG | Measured (PDT) | Source tree | Record |
-| --- | --- | ---: | ---: | --- | --- | --- |
-| Qwen3.8-27B Q8_0 | plain, llama-bench | 696.9 | 37.9 | 2026-11-05 | `bc0ce9691` | [catch-up](#2026-11-05-catch-up-to-official-4b77dee05) |
-| Qwen3.8-27B Q8_0 | MTP2, llama-cli | - | 64.1 | 2026-11-05 | `bc0ce9691` | [catch-up](#2026-11-05-catch-up-to-official-4b77dee05) |
-| Qwen3.8-27B Q8_0 | DFlash5, llama-cli | - | 67.4 | 2026-11-05 | `bc0ce9691` | [catch-up](#2026-11-05-catch-up-to-official-4b77dee05) |
-| Qwen3.8 Flash Next IQ3_XXS | plain, llama-bench | 527.6 | 39.1 | 2026-10-29 20:01 | `f5031e739`, not re-measured | [rebuild table](#2026-10-29-rebuild-on-official-36a0e2ffc) |
-| Qwen3.8 Flash Next IQ3_XXS | MTP2, llama-cli | - | 49.6 | 2026-10-29 20:29 | `f5031e739`, not re-measured | [speculative runs](#speculative-decoding-on-d-one-run-each) |
-| Flash Next UD-IQ3_XXS + Q8_0 n-gram table | plain, llama-bench @8K, F2 + P4 | 563.8 | 45.7 | 2026-11-06 | `52bcba210` | [F2, P4](#2026-11-06-f2-p4-toolchain-check-and-acceptance-aware-speculative-runs) |
-| Flash Next UD-IQ3_XXS + Q8_0 n-gram table | MTP3 (Q8_0 sidecar on ROCm1), 100K ctx, llama-server 5-prompt mean | - | 62.7 (49.5 ms/step, accept 0.72) | 2026-11-06 | `0920eb0ac` | [F2, P4](#2026-11-06-f2-p4-toolchain-check-and-acceptance-aware-speculative-runs) |
-| Qwen3.8-27B Q8_0 | MTP2, llama-server 5-prompt mean | - | 62.5 (40.3 ms/step, accept 0.78) | 2026-11-06 | `0920eb0ac` | [F2, P4](#2026-11-06-f2-p4-toolchain-check-and-acceptance-aware-speculative-runs) |
-| Flash Next UD-Q3_K_XL + Q8_0 n-gram table | plain, llama-cli, 100K ctx, F16 KV, `-ub 256` | 409.1 (CLI) | 42.1 | 2026-11-06 | `3e19b6adc` | [big quants](#2026-11-06-flash-next-big-quants-repack-conversion-q8_0-n-gram-table-100k-and-mtp-fit) |
-| Flash Next UD-Q3_K_XL + Q8_0 n-gram table | MTP2 (Q4_0 draft on ROCm1), 32K ctx, F16 KV | 390.5 (CLI) | 51.5 | 2026-11-06 | `3e19b6adc` | [big quants](#2026-11-06-flash-next-big-quants-repack-conversion-q8_0-n-gram-table-100k-and-mtp-fit) |
+| Model | Config | PP2048 (old / new) | TG128 (old / new) | Build | Grade |
+| --- | --- | --- | --- | --- | --- |
+| 27B Q8_0 | 2 GPUs, `-sm tensor` | 613.5 / 614.5 | 37.14 / 37.21 | `build-inkling-final-20261121` | A |
+| Flash Next UD-IQ3_XXS | 2 GPUs, `-sm tensor` | 655.0 / 657.7 | 49.90 / 50.18 | `build-inkling-final-20261121` | A |
+| Inkling 2 Mini IQ4_NL | ROCm0 | 564.2 / 878.6 | 36.28 / 47.75 | `build-inkling-final-20261121` | A |
+| Inkling 2 Mini Q8_0 | ROCm0 | 566.1 / 880.1 | 34.47 / 44.41 | `build-inkling-final-20261121` | B (one run each) |
+| Inkling 2 Mini NVFP4 + Q8_0 | ROCm0 | new build 836.3 (no old run) | new build 45.80 (no old run) | `build-inkling-final-20261121` | B (no alternated old build: the old build lacks NVFP4 support) |
 
-A row is out of date once the runtime source changes after its source tree. Check with (replace the commit with the row's tree):
+To refresh: run the [single final validation pass](how-to-catchup.md#one-final-validation-pass) on the new build against the last good build, with the order and temperature rules below, replace this table, and add the full run as a new record in PERFORMANCE-RECORDS.md. Older rows (2026-10-29 to 2026-11-06) stay in the records file.
 
-```sh
-git diff --quiet bc0ce9691 HEAD -- . ':!vr' ':!AGENTS.md' ':!CLAUDE.md' ':!README.md' && echo current || echo stale
-```
+## How to test
 
-A new toolchain, driver or model revision also makes a row stale, even if the check prints `current`. The Flash Next rows used the IQ3_XXS file from rev `c8b5954a88c2`; unsloth replaced it on 2026-11-04. When re-measuring, update the row and add the full run as a new dated record below.
+For weekly merges use the [single final validation pass](how-to-catchup.md#one-final-validation-pass). It is a regression screen. It does not decide whether an optimization idea works. The rules below apply to optimization experiments. Scripts: [scripts](scripts/README.md).
 
-Against official llama.cpp with the same build flags (2026-10-29, `36a0e2ffc`): +53% 27B PP, +12% 27B TG, +74% Flash Next PP, no Flash Next plain TG gain.
+### Grades
 
-## How to test, and what the status words mean
+Every performance statement in the docs carries one grade.
 
-For weekly merges, use the [single final validation pass](how-to-catchup.md#one-final-validation-pass). Its one-repeat PP/TG pair screens for regressions; it does not validate or reject an optimization idea. The stronger evidence requirements below apply to optimization experiments.
+- **A**: alternated or repeated A/B on the real model, with numbers.
+- **B**: single or one-order measurement, microbench, or a baseline from another time.
+- **C**: estimate or derivation.
+- **D**: assertion, no measurement found.
 
-Every idea below has one status:
+If the measurement behind a number cannot be found, grade it lower and say so. Do not use the words "validated", "proven", "always", "never", "cannot", "only", "big win", or the phrases "largest ... lever" and "honest ... total" for anything below grade A. For a lost experiment write "tried: this approach did not work", say what a different approach could try, and do not write "the idea is wrong".
 
-- **Landed**: in main, with the evidence named.
-- **Tried, approach did not work** (older entries say "validated wrong"): a test that could show the effect was run on that specific implementation, and the effect was not there. The test, the numbers, why it lost and, where kept, the archived code are named. This judges the approach, not the idea: a different or smarter implementation may still win, so read the row and its record first, then retry with a new angle.
-- **Not shown**: something was run, but the test could not show the effect (change did not fire, wrong metric, one run inside the noise). Not a reason to drop the idea; the row says what a proper test needs.
-- **Open**: not tested.
-- **Rejected**: user decision. Do not propose again.
+### Status words
 
-A test can mark an approach as tried and not working only if it does all of these:
+- **Worked**: in main, with the evidence and its grade.
+- **Did not work**: one specific implementation lost a test that could show the effect. The row says what was tried, the numbers, why it lost (if measured), and what was not tried. A different approach may still win.
+- **Not actually tested**: the change was not built, or just a premise was checked.
+- **Hypothesis**: not tested, or a test could not show the effect (the change did not fire, wrong metric, one run inside the noise).
+- **Retired**: a claim that later evidence contradicts or replaces. Listed so nobody believes it again.
 
-1. Confirms the change runs: kernel counts in a `rocprofv3 --kernel-trace`, a debug counter, or a changed output where one is expected. The scale-fold attempt below measured a build where the fusion never fired.
-2. Measures the metric the change targets. AllReduce slab overlap is a PP change, so a TG run cannot judge it.
-3. Beats the noise. Matched builds, same settings, baseline and candidate alternating. 27B TG varies about +-0.3 t/s between runs, so r3 alternating is enough. Flash Next TG ranged 33.3-40.1 t/s across one-repeat baselines on 2026-10-29 and Flash Next PP varies up to about 18 t/s, so Flash Next needs r5 alternating, or a profile that shows the change in kernel time.
-4. For speculative modes, uses [`spec_accept.sh`](scripts/spec_accept.sh) (llama-server, 5 prompts) and compares ms per verify step, not single-prompt llama-cli TG. A rounding change flips the greedy text, and with it the acceptance: on 2026-11-06 one llama-cli prompt moved 27B MTP2 from 62 to 54 and Flash Next MTP3 from 53 to 63 with step time unchanged.
-5. Quality for non-bit-exact changes: KLD against the same build with the change off. Flash Next has a KLD noise floor of about 4.5e-3 (same top token about 98.7%): harmless changes such as `-ub 256` or `-ts 0.52,0.48` reach it, and so does a 3e-7 relative change in one F32 matmul. Judge a change against that floor and PPL, not against 1e-3. Changes that act only for small batches (decode, verify) need the KLD run at `-b 8 -ub 8`; at the default ubatch they never fire.
-6. Compares output: greedy text hash against the baseline. Speculative runs diverge from plain after about 1500-2000 bytes (batched verify flips near-tie tokens), so compare speculative runs to speculative runs.
+### Test rules
 
-Keep the 50/50 split for A/B work. Ask for explicit OK before performance runs. Use `rocprofv3` timings only for attribution: profiled TG was 21-45% slower than unprofiled. Scripts: [scripts](scripts/README.md).
+A test marks an approach as "did not work" if it does all of these:
 
-## Record format
+1. Confirms the change runs: kernel counts in a `rocprofv3 --kernel-trace`, a debug counter, or a changed output where one is expected. The scale-fold attempt measured a build where the fusion did not fire.
+2. Measures the metric the change targets. AllReduce slab overlap is a PP change, so a TG run does not judge it.
+3. Beats the noise: matched builds, same settings, baseline and candidate alternated A B B A. Start below 60C. On 2026-11-21 benchmarks drifted 15-30% when the GPUs were hot (B). The older notes said 27B TG varies about +-0.3 t/s between runs; that was measured on cool, rested GPUs. Flash Next TG ranged 33.3-40.1 t/s across one-repeat baselines on 2026-10-29 and Flash Next PP varied up to about 18 t/s (B), so for Flash Next use r5 alternating, or a profile that shows the change in kernel time.
+4. For speculative modes, use [`spec_accept.sh`](scripts/spec_accept.sh) (llama-server, 5 prompts) and compare ms per verify step, not single-prompt llama-cli TG. A rounding change flips the greedy text and with it the acceptance: on 2026-11-06 one llama-cli prompt moved 27B MTP2 from 62 to 54 and Flash Next MTP3 from 53 to 63 with step time unchanged (B).
+5. Check quality for changes that are not bit-exact (next section).
 
-Add each run as a dated record (newest first) in this shape. Keep it short; put raw files, including the generated text for quality checks, in `vr/old-ignore/<date>/<name>/` and link them.
+Keep the 50/50 split for A/B work. Ask for explicit OK before performance runs.
 
-Standard settings, so records only name what differs. Both GPUs, all layers offloaded, `-sm tensor -ts 1/1 -fa on`, build flags from the [catch-up guide](how-to-catchup.md#one-final-validation-pass), no env knobs:
+### Quality checks
 
-- 27B: `-b/-ub 2048/2048 -t 20`, F16 KV. llama-bench PP2048/TG128; llama-cli `flake.nix` prompt (~2K tokens), 512 tokens, greedy, ctx 16384.
-- Flash Next: `-b/-ub 1024/512`, F16 KV, same workloads. Never quantize the KV cache (user rule, 2026-11-06); records before 2026-11-06 and the 2026-11-06 8K rows used Q8_0 KV.
+- Greedy text equality is a smoke test, not evidence of equal quality. Speculative runs diverge from plain after about 1500-2000 bytes (batched verify flips near-tie tokens), so compare speculative runs to speculative runs.
+- Use `llama-perplexity` and `llama-perplexity --kl-divergence` against the same build with the change off. Flash Next has a KLD noise floor of about 4.5e-3 with the same top token about 98.7% (B): harmless changes such as `-ub 256` or `-ts 0.52,0.48` reach it, and so does a 3e-7 relative change in one F32 matmul. Judge a change against that floor and PPL, not against 1e-3. Changes that act on small batches (decode, verify) need the KLD run at `-b 8 -ub 8`.
+- Inkling 2 Mini: output moves by mean KLD 0.0049 when the ubatch size is the one change (512 vs 2048), and the same config twice gives KLD 0 (B, 2 chunks). Greedy-text equality and KLD or PPL differences of that size (for example PPL 2.8307 vs 2.8305) do not separate a bug from noise on that model.
+- For an attention change also run a logit-level check (KLD), not only greedy text.
+
+### Profiler caveats
+
+- `rocprofv3` adds about 1.2 us to every kernel and shows a 4.2 us floor for a launch, while the cost in the app is about 2.2 us (B). Use traces for kernel counts and ranking, not absolute time.
+- Profiled TG slowdown has two ranges that are not reconciled: 21-45% (older How to test text, from the 2026-10-29 Flash Next profile at 21% and the N2 trace at 31-45%; [2026-10-29 profile][rec-1029-prof], [N2][rec-1029-n2]) and 7-24% ([2026-11-06 F2/P4 record][rec-1106-f2], [TOKEN-BUDGET.md](TOKEN-BUDGET.md) method). Profiled PP changes by 2-4% (TOKEN-BUDGET.md). Treat profiled ms as an upper bound.
+- Host `perf` is blocked on this machine (`perf_event_paranoid=4`). Use host timestamps around graph compute, or the gaps between kernels in a trace.
+
+### Record format
+
+Add each run as a dated record, newest first, in [PERFORMANCE-RECORDS.md](PERFORMANCE-RECORDS.md). Keep it short. Put raw files, including generated text, in `vr/old-ignore/<date>/<name>/` and link them.
+
+Standard settings (a record names only what differs): both GPUs, all layers offloaded, `-sm tensor -ts 1/1 -fa on`, build flags from the [catch-up guide](how-to-catchup.md#one-final-validation-pass), no env knobs. 27B: `-b/-ub 2048/2048 -t 20` (the 2026-11-21 runs used `-ub 512`), F16 KV; llama-bench PP2048/TG128. Flash Next: `-b/-ub 1024/512`, F16 KV. Do not quantize the KV cache (user rule, 2026-11-06); records before that date and the 2026-11-06 8K rows used Q8_0 KV.
 
 ```markdown
 ### YYYY-MM-DD short title
 
 Purpose in one sentence. Kind: regression screen | A/B experiment | profile.
 
-- Source: `<commit>` (what it contains); baseline `<commit or build_commit>`.
+- Source: `<commit>`; baseline `<commit or build_commit>`.
 - Model: `<quant>` rev `<12 chars>`; draft `<file>` if any.
-- Settings: standard 27B | standard Flash Next, plus only what differs (e.g. `-ts 0.52/0.48`, `GGML_CUDA_FLASHNEXT_MOE=1`, ctx 100K).
+- Settings: standard 27B | standard Flash Next, plus what differs.
 - Workload: standard, or what differs; repeats and order (e.g. r3 alternating).
 
 | Build | Mode | PP t/s | TG t/s | Change | Accept | Output |
@@ -74,567 +87,581 @@ Purpose in one sentence. Kind: regression screen | A/B experiment | profile.
 | baseline | MTP2 | 514.0 | 60.7 | - | 2.6/3 | sha `ab12...` |
 | candidate | MTP2 | 516.2 | 61.0 | +0.5% | 2.6/3 | same |
 
-Verdict: one sentence, and the status word if it judges an idea. Not covered: what was not run. Raw: [link](old-ignore/...).
+Verdict: one sentence, with a grade. Not covered: what was not run. Raw: [link](old-ignore/README.md).
 ```
 
-Rules: change is `(candidate / baseline - 1) * 100` on the same row type. Write `-` for not measured, never leave a cell blank. Output is the sha (first 12 hex) of the generated text only, without the CLI banner (it contains the build id), or "same"/"differs after N bytes". Accept is mean accepted tokens per draft step over draft size; `llama-cli --simple-io` does not print it, so write `-`. Update [Current numbers](#current-numbers) only from a record that used the current source.
+Change is `(candidate / baseline - 1) * 100` on the same row type. Write `-` for not measured. Output is the sha (first 12 hex) of the generated text without the CLI banner, or "same" / "differs after N bytes". Accept is mean accepted tokens per draft step over draft size. Update [Current numbers](#current-numbers) from a record that used the current source.
 
-## Idea ledger
+## What we know
 
-Ceilings are per-token estimates from profiles, not forecasts. Ids from older records are kept: A = fork audit, N = further code ideas, S = Strata review, L = optimization-lab review, P = Flash Next priorities, M = merge follow-ups, D = long-context depth.
+Measured facts from 2026-11-21 and 2026-11-22. Grades: A alternated, B one trace or microbench. Raw data: `build-inkling-final-20261121/validation` (builds not in every worktree). The cost-model details are in [launch-floor-playbook.md](launch-floor-playbook.md).
 
-Priority: ideas that raise plain PP or TG come first, because every mode gains from them. Work that only helps MTP or DFlash comes after those run out, and then only for large gains.
+- Steady-state token generation is 98% GPU-busy with kernels back to back (trace gaps zero at p99) on Inkling 2 Mini, 96-99% on 27B, 83-88% on Flash Next (B: one trace each). The limit is the GPU queue, not the host, except the Flash Next idle share.
+- A kernel launch costs about 2.2 us in the app: 1.5 to 1.9 us saved per launch removed by kill switches (A, three ABBA tests), 2.0 us bare on the MI60 and 2.6 us on the MI50 (B, microbench). `rocprofv3` adds about 1.2 us per kernel and shows a 4.2 us floor. The bare cost did not change with grid size up to 64 blocks, threads per block or argument count (B, microbench; kernels with reductions are longer).
+- Captured HIP graphs are active for Inkling 2 Mini generation (B: debug log shows warmup complete, no unstable disable).
+- More streams give 1.45x launch throughput from one host thread, 1.9x with a host thread per stream (B, microbench).
+- 27B Q8_0 generation: 69% of traced kernel time is weight mat-vec; AllReduce kernel 9%; 1,645 launches per token per GPU (B, one trace).
+- Flash Next generation: 2,811 launches per token per GPU; experts 21%, AllReduce kernel 11%, `dsv4_hc_mix_down` / `dsv4_hc_mix_up` 11 us per call (B, one trace).
+- A fused kernel with one 256-thread block per token and a tree reduction per sum cost 26.7 us per call. Rewritten with a wide block and warp reductions it gave TG 43.57 to 47.73 on Inkling IQ4_NL (A). A one-block kernel that also did three weight matmuls took TG from 40.5 to 11.7 (A).
+- Inkling 2 Mini output moves by mean KLD 0.0049 when the ubatch size is the one change, and the same config twice gives KLD 0 (B, 2 chunks).
+- Inkling 2 Mini generation slows with context: 36.4 t/s at 4K context (untraced); under trace 32.8 t/s at 4K against 37.4 t/s at 16 tokens. 93% of the growth is one kernel, `flash_attn_ext_vec`, from 15.6 us to 85.8 us per call (B, one trace pair, 2026-11-22; not yet in a dated record). The bias chain kernels do not grow.
+- Benchmarks drift 15-30% when the GPUs are hot. An A/B is valid when alternated (A B B A) and started below 60C (B).
+- Host `perf` is blocked on this machine (perf_event_paranoid=4).
 
-### Landed
+- One thread block behaves like about 1/30 of the GPU (B, microbench on the MI60, 2026-11-22, [source](investigation-notes/2026-11-22-one-block-rule/single_block_bench.cpp)). A one-block kernel with 1024 threads costs about 2.1 us + 0.26 us per 1000 floats touched for elementwise work, and 2.9 us + 0.46 us per 1000 floats with a row reduction and a second pass (26 to 30 GB/s against about 800 GB/s for the card). The same work split over many blocks costs 2.3 to 2.8 us at any size tested (up to 72 blocks of 1024 threads).
+- In the same microbench: threads per block matter (4608 floats in one block: 64 threads 18.1 us, 256 threads 6.30 us, 1024 threads 3.39 us); a barrier costs about 0.08 us; each dependent reduce-then-use phase adds about 1.6 us; a two-kernel reduction (per-block partial sums, then many blocks that read the partials and write their slice) costs about 5.4 us for both launches up to 36864 floats and is cheaper than one block above about 5000 floats (B).
+- The rule fits four kernels that were measured before it existed (C, prediction against one trace each; the trace adds about 1.2 us): 27B `add_rms_norm_mul_f32` without the Q8_1 output, 5120 floats and three inputs, predicted about 8.7 us, traced 8.2; Inkling `res_mix_f32`, about 11.5K floats read twice, predicted about 12 us, traced 16.2; the one-block loop controller, about 600K floats, predicted 160 to 280 us, measured about 630 us; `flash_attn_ext_vec` at 4K context if it runs one block per head, about 2.1 MB per head, predicted about 70 us, traced 85.8.
 
-| Id | Change | Evidence | Gap in the evidence |
-| --- | --- | --- | --- |
-| B1 | One-wave MoE routing kernel `topk_moe_wave_cuda<512,10>` on gfx906 (512 experts, top-10, no bias, no groups, rows <= 8; 32-lane logical warps, integer min-reduction for the winner, rolled k loop); bit-exact, other shapes keep `topk_moe_cuda` | 2026-11-10: 14.9 vs 28.8 us/call in the Flash Next decode trace; Flash Next TG128 @8K r5, 4 alternating rounds: 45.71 +- 0.04 -> 47.53 +- 0.17 t/s (+4.0%); greedy and MTP3 text byte-identical; test-backend-ops TOPK_MOE incl. new 512x10 rows 1-9; bitwise old/new harness with ties and NaN. Also fixes the pre-existing grouped `TOPK_MOE` failures (HIP 7 `__ballot_sync` mask, see IMPROVEMENTS merge traps). [Record](old-ignore/2026-11-10/play-b1/README.md) | Prefill (rows > 8) still uses the old kernel; the 16-group softmax butterflies (about 80 shuffles) could drop to about 10 with a transposed reduction; a true wave64 version is part of W64 |
-| - | AllReduce slab overlap, `GGML_CUDA_AR_SLABS=4` | Oct 12: 27B PP2048 651 (off) -> 682 (4), text identical. TG neutral in the 2026-10-29 A1 sweep | PP not re-measured on the rebuild tree |
-| - | Parallel lane dispatch, `GGML_META_PARALLEL_DISPATCH=1` | A1 sweep: off costs about 1.5 t/s TG on both models against neighbouring baselines | One repeat per run, but both models agree and the drop is above 27B noise |
-| - | Whole-token HIP graph replay | 2026-10-29 trace: two `hipGraphLaunch` per token, no per-kernel launches, both models | - |
-| - | MTP2 with `--spec-draft-backend-sampling` as the speculative default | 27B +68% vs plain, Flash Next +33% (one run each, 2026-10-29) | Best depth: MTP2 beat MTP3 on Oct 12 and 2026-10-29, MTP3 won on Oct 25; all single runs. On 2026-11-05 DFlash5 beat MTP2 on 27B at a 2K prompt (67.7 vs 63.9) but lost at 32K (39.9 vs 42.7), see [record](#2026-11-05-27b-config-sweep-and-32k-depth) |
-| - | gfx906 two-row IQ2_S one-token expert path | +2.37% TG in one matched pair, output matched, 3 CPU-reference cases | One pair; not repeatability evidence |
-| - | Repack Q5_0 (native, 22 B/32) and IQ4_XS (into the IQ4_NL layout) on gfx906, `GGML_CUDA_REPACK_CONVERT=0` disables | Flash Next UD-Q3_K_XL @8K: +2.3% TG and about +6% PP; UD-IQ4_XS: +3.5% TG, +9% PP; PPL unchanged; 132 repack-vs-CPU cases and 234 `test-backend-ops` cases pass ([record](#2026-11-06-flash-next-big-quants-repack-conversion-q8_0-n-gram-table-100k-and-mtp-fit)) | A/B measured with Q5_0 still through the Q5_1 layout; native Q5_0 is exact and memory-neutral but not separately timed |
-| S2 | Cheaper IQ sign apply on gfx906 (`iq_apply_signs`) in the IQ2_S mat-vec and the IQ2_S/IQ3_XXS MMQ tile loads; bit-exact | Flash Next r5 alternating: +5.1% TG, +3.1% PP, same output ([record](#2026-11-06-s2-cheaper-iq-sign-handling-on-gfx906)) | Measured on the old UD-IQ3_XXS upload only |
-| K1 | One `set_rows` for the recurrent conv snapshots (one permuted view instead of 3 stores per layer), no redundant cont before the ssm snapshot store, float4 F32 `set_rows`; `GGML_K1_STATE_STORE=0`, `GGML_K1_SET_ROWS_VEC=0` disable | 27B MTP2 spec_accept 40.38 -> 38.95 ms/step (-3.5%), mean TG 62.4 -> 64.7, same acceptance 0.777; reply byte-identical; TP check pass n=1/2048; SET_ROWS tests pass. The K/V cache writes were already fused (ROPE+VIEW+SET_ROWS); the 193 `k_set_rows`/token were recurrent-state snapshots | One pass each way; Flash Next (also delta-net) not measured |
-| F2 | Fused hyper-connection mix op `GGML_OP_DSV4_HC_MIX` for 1-8 tokens (3 launches instead of 7; Q8_0 hc weights read with int8 activations like `mul_mat`), `GGML_CUDA_HC_MIX_FUSED=0` disables | Flash Next TG128 @8K 40.8 -> 46.0 (+12%, 2 rounds); MTP3 100K step time 52.2 -> 49.5 ms (-5.2%), 5-prompt mean TG 59.4 -> 62.7; KLD at `-ub 8` 4.4e-3, at the noise floor; DSV4_HC_MIX 12/12 vs CPU ([record](#2026-11-06-f2-p4-toolchain-check-and-acceptance-aware-speculative-runs)) | Not tuned for T=4 (47 us per call) |
-| P4 | Tiled split-K F32 GEMM for small-M matmuls on GCN (`hc_*_inject` M=4, `ssm_alpha/beta` M=24; rocBLAS is slow for these), `GGML_CUDA_SGEMM_F32=0` disables | Flash Next PP2048 @8K 508.9 -> 563.8 (+11%), PP512 +12%, TG unchanged; 2520 `MUL_MAT` cases pass; KLD 4.7-5.1e-3 per family, at the noise floor, PPL unchanged ([record](#2026-11-06-f2-p4-toolchain-check-and-acceptance-aware-speculative-runs)) | The router GEMM itself (M=512) was already fine in rocBLAS |
-| - | Grouped MoE for 2-8 token verify, on by default since 2026-11-06 (`GGML_CUDA_FLASHNEXT_MOE=0` disables) | Oct 25: about 5.9% mean TG on Flash Next MTP2; 2026-11-06 UD-IQ3_XXS at 100K: MTP2 48.9 -> 51.8, MTP3 49.1 -> 52.8, byte-identical output ([record](#2026-11-06-flash-next-ud-iq3_xxs-at-100k-with-mtp)) | Only IQ2_S and IQ4_NL expert weights; IQ4_XS stored as IQ4_NL is excluded |
+### Numbers that disagree
 
-### Tried, approach did not work
+Several quantities appear with different values in older text. They measure different things (different denominators) or were not reconciled. Do not pick one without checking what it divides by.
 
-Each row is one specific implementation that lost, not a verdict on the idea. Rows say what was tried, the numbers, why it lost, what was not tried, and link the record (with the archived patch or core code where it was kept). Use them as a starting point for a better attempt.
-
-| Id | Approach tried | Test and result |
-| --- | --- | --- |
-| TB1 | QSA decode top-k as one bitonic argsort instead of 12 radix launches (HIP, one row, <= 16384 columns) | 2026-11-10 `test-backend-ops perf -o TOP_K`, 1 row, k 512: radix 71-87 us against bitonic 131 (2112 cols, 8K ctx), 625 (8256, 32K), 883 us (16384); the 12 radix launches cost only 70-90 us per call. QSA-shaped TOP_K test cases kept. A fused single-block radix kernel is the remaining route. [Record](old-ignore/2026-11-10/play-tb1/README.md), [patch](old-ignore/2026-11-10/play-tb1/bitonic-one-row.patch) |
-| A7 | Higher occupancy in the repacked Q8_0 prefill GEMM (64x64 tiles; 3 waves/SIMD with 256 threads, 4 with 512) | 2026-11-10 bit-identical on 20 shapes (repack harness), but GEMM n 2048 k 5120: 24-31% (V1) and 37-57% (V2) slower on both GPUs; the kernel is VALU/LDS-issue bound, smaller tiles halve weight reuse and add spills. Untried: larger tiles (TN 3-4 with a shorter BK), fewer per-output conversions. [Record](old-ignore/2026-11-10/play-a7/README.md), [patch](old-ignore/2026-11-10/play-a7/gemm-variants.patch), [bit-exact repack GEMM harness](old-ignore/2026-11-10/play-a7/rpgemm.cpp) |
-| N1 | DFlash draft graph rebuilds every call and blocks replay; keep both draft graphs allocated | 2026-10-29 instrumented build: a rebuild costs 0.36 ms, 1.1% of the run, and the draft already replays through ggml-cuda HIP graphs (67 replays, 2 re-captures). The Oct 12 premise predates the single-GPU draft. [Record](#2026-10-29-n1-dflash-draft-replay-check) |
-| A1 (27B TG) | Uneven `-ts` for 27B TG | Every split slower on 2026-10-29: 0.52/0.48 about -1 t/s (initial run and two r2 retests), 0.48/0.52 -1.9, 0.56/0.44 -2.5. Oct 12 agrees: 53/47 35.6 and 56/44 34.8 vs 36.8 at 50/50 |
-| - | `-sm layer` instead of tensor split on Flash Next | 30.99 vs 38.94 TG, -20%; one run, but far outside the noise |
-| N2a | Overlap the two lanes' graph launches | 27B 36.63 -> 36.67, one pair, inside 27B noise; the trace shows the launch stagger is not on the critical path |
-| N2b | Stage the remaining small F32 inputs asynchronously (`GGML_SCHED_INPUT_STAGING_F32_MAX=1048576`) | r3 alternating, both models, no change Knob removed, archived 2026-11-21, see old-ignore/2026-11-21/knobs. |
-| - | Avoid the HIP 2D memcpy in `ggml_cuda_cpy` (use the copy kernels) to cut `copyBufferRectAligned` time | 2026-11-06 UD-IQ3_XXS @8K r2 x2 alternating: PP 515.5 vs 515.4, TG 40.53 vs 40.37; the rect copies come from tensor-split staging. [Record](#2026-11-06-flash-next-ud-iq3_xxs-at-100k-with-mtp) |
-| F1 | Move tensor-split host traffic off blit kernels | 2026-11-06 load-excluded profile: the `copyBufferRectAligned` time was the load-time weight upload (`set_tensor_2d`), not runtime traffic; the runtime rect copies are about 4% of MTP3 kernel time. [Record](#2026-11-06-f2-p4-toolchain-check-and-acceptance-aware-speculative-runs) |
-| N3 | Two-half ubatch pipelining of prefill AllReduce | 2026-11-06 estimate from the 27B PP profile: 3-5% at best, the MI50 is busy 94.6% and the AR is mostly overlapped |
-| - | Q8_0 MTP sidecar on ROCm0 (faster MI60) instead of ROCm1 | 2026-11-06 llama-server 5-prompt run with F2: 49.9 vs 49.5 ms/step, no gain. The earlier single-prompt +4% was an acceptance effect. `-ts 0.50,0.50` with the draft on ROCm0 runs out of memory |
-| - | The 2026-11-06 ROCm 10.3.0a20261105 nightly slows 27B MTP2 | Same source with the old 10.2.0a20261012 clang (`6da73151`) vs the new one (`36c1564f`): 27B MTP2 40.28 vs 40.27 ms/step, PP2048 712 vs 705, TG 37.8 vs 37.7; Flash Next MTP3 51.4 vs 49.5 ms/step (new is faster). The 64 -> 55 llama-cli drop was acceptance on a different greedy text |
-| - | MTP draft with its experts on the CPU (`-cmoed`) to fit Flash Next MTP at long context | 2026-11-06, UD-Q3_K_XL 64K: MTP2 34.9 vs plain 43.8 TG. The CPU sync per draft step costs more than speculation gains. [Record](#2026-11-06-flash-next-big-quants-repack-conversion-q8_0-n-gram-table-100k-and-mtp-fit) |
-| - | `-b/-ub 4096` for 27B PP | 2026-11-05 llama-bench PP4096 r3: 606.3 +- 3.2 vs 684.1 +- 1.6 at ub 2048, -11.4%. [Record](#2026-11-05-27b-config-sweep-and-32k-depth) |
-| - | Content-keyed meta token graph cache for the draft (Oct 12) | Wrong output: draft acceptance length fell from 2.95 to 1.1-1.6 |
-| - | Multi-row planar Q8_1 producer (Oct 12) | Halved quantize launches but made the norm kernel slower by the same amount |
-| Q1 | Fuse AllReduce + residual add + RMS norm + q8_1 quantize (27B TG) | 2026-11-10 rocprofv3: the chain is already one kernel (`add_rms_norm_mul_f32` with the q8_1 producer), 130 x 10.7 us = 1.4 ms/token, at most about 0.8 ms recoverable. An unrolled epilogue was slower (12.9 us); a column split is blocked by in-place ADD/MUL aliasing. The rest belongs with AR-LL. [Record](old-ignore/2026-11-10/exp-q1/README.md), patches [unrolled](old-ignore/2026-11-10/exp-q1/unrolled-v1.patch) and [split](old-ignore/2026-11-10/exp-q1/split-v2.patch) |
-| Q3 | Faster 27B Q8_0 mat-vec (deeper prefetch, more rows per block, row split) | 2026-11-10 microbench of the real per-GPU decode shapes: best pure stream 760-800 GB/s at these sizes (900+ only for 2 GiB reads); the kernel reaches 89-90% of it. 2-5 loads in flight -1 to -18%, 4/16 rows per block -1/-70%, row split -3 to -40%; `GGML_RP_MMV_ROWS=4` TG +0.3% (noise). Untried: contiguous per-block reads with a per-row LDS re-reduce (bit-exact; about 1.9 ms/token is the most left). [Record](old-ignore/2026-11-10/exp-q3/README.md), [microbench with the variants](old-ignore/2026-11-10/exp-q3/mvbench.hip) Knob removed, archived 2026-11-21, see old-ignore/2026-11-21/knobs. |
-| M1 | DFlash device feature rows (`LLAMA_DFLASH_DEV=1`) on 27B tensor split | 2026-11-10: 128 vs 55 ms/step. Under `-sm tensor` the feature buffer is a mirrored meta tensor, so the scheduler copies 200 MiB to the single-GPU draft each step. [Record](old-ignore/2026-11-10/exp-spec/README.md) |
-| - | MTP device rows (`LLAMA_MTP_DEV_ROWS=1`) on 27B tensor split | 2026-11-10: engages, 40.6 vs 40.6 ms/step, same output, but it disables deferred prefill, so long-prompt TTFT +18%. [Record](old-ignore/2026-11-10/exp-spec/README.md) |
-| - | Oct 12 smaller items: MTP fused catch-up (already overlapped with sampling), nc unroll 2, `GGML_RP_NC_FUSION`, MTP `p-min` (TG 55 -> 29-31), DFlash mirrored output head | Each measured in the [Oct 12 work log](old-ignore/2026-10-12/notes/2026-10-12-work-status.md) |
-| SP1a | Lift the `-sm tensor` refusal of backend sampling (`LLAMA_TP_BACKEND_SAMPLING=1`) and let the meta backend gather the split logits | 2026-11-18, 27B MTP2: aborts at load. Sampler sums over the split vocab become tiny PARTIAL tensors; the AllReduce declines them (was an assert, now a fallback, kept) and `get_tensor_async` cannot read PARTIAL back. Needs a small-PARTIAL reduction or split-aware top-k/argmax (SP1 proper). [Record](old-ignore/2026-11-18/sp1-tp-backend-sampling/README.md), [patch](old-ignore/2026-11-18/sp1-tp-backend-sampling/tp-backend-sampling-switch.patch) |
-
-### Not shown (test could not show the effect)
-
-| Id | Idea | What was run | Why it does not decide the idea | Proper test |
+| Quantity | Value | What it measured | Date | Source |
 | --- | --- | --- | --- | --- |
-| P1a | Fold the constant `1/hc` scale into the hyper-connection down mat-vec | Build plus Flash Next r5 TG (-0.5%) | The fusion never fired: identical kernel counts (10145 `scale_f32` on both builds) | First get a lower `scale_f32` count in a trace. The trace bounds this subset at about 0.4 ms/token and all 303 scales at about 1.2 ms (profiled) |
-| A2 | Defaults `LLAMA_SHEXP_SPLIT=1` and `GGML_SCHED_SHARE_VIEW_INPUTS=1` | TG128, one repeat each (A1 sweep) | Off was 0.6-1.1 t/s slower on Flash Next, inside its noise; 27B share-view off -0.1. Both knobs also act on PP, which was not run | PP2048 r3 (27B) or r5 (Flash Next), alternating; drop a knob that shows no difference |
-| A1 (FN, PP) | `-ts` for Flash Next TG, and for PP on both models | Flash Next TG one repeat: 0.52/0.48 37.80 vs 37.46, 0.48/0.52 36.64 vs 40.08 | Inside Flash Next TG noise; PP not rechecked (Oct 12: 56/44 gave +3% 27B PP for -5% TG) | Flash Next TG r5 alternating; PP2048 r3 at 56/44 for a PP-only profile. 2026-11-10 budget: on Flash Next TG `-ts` moves only mat-vec and expert rows (about 10.6 ms), while ROCm1 is 2.0 ms late in small kernels that both ranks run whole; expect at most about 0.4 ms from a 4% shift |
-| - | `-t 16` on Flash Next | One sample: 39.44 vs 37.64 in the same run | One sample inside the noise | r5 alternating against `-t 8` |
-| N2 | Per-token host gap before each token graph | Profiled idle 1.04 ms/token (27B) and 4.48 ms/token (Flash Next); two fixes (N2a, N2b) refuted | The gap was only measured under the profiler, which slowed TG 31-45% in that trace. Its unprofiled size and cause are unknown; scheduler event waits, launch cost and profiler overhead are guesses | Measure idle time without the profiler (host timestamps around graph compute and the logits readback). Only then consider decode pipelining, a large change (GPU-side sampling only, late stop detection, conflicts with MTP). 2026-11-10 budget: ROCm0's own start gap (no slow-launch lag) is 0.25 ms (27B@0) and 0.90 ms (FN@8K), 1.22 at FN@32K; Flash Next's extra looks like per-token input work, see TB5 |
-| - | Grouped-MoE gain on the current tree (roofline experiment 3) | Not re-run since Oct 25 | - | MTP2 with `GGML_CUDA_FLASHNEXT_MOE=0/1`, r5 alternating, same acceptance; record the per-layer expert union size. If it holds, consider making it the default |
+| 27B share of the bandwidth roof | 75% | weight-stream time (28.7 GB at 650-715 GB/s, 20-21 ms) over the 27.2 ms token | undated text, cites the 2026-10-12 profile | old "What limits each model" text (see [records][rec-1029-x]) |
+| | 77% | same weight-stream time over the unprofiled 26.70 ms budget token | 2026-11-10 | [TOKEN-BUDGET.md](TOKEN-BUDGET.md) |
+| | 89-90% | repacked mat-vec kernel over the best pure stream (760-800 GB/s) at the real shapes | 2026-11-10 | [Q3 microbench](old-ignore/2026-11-10/exp-q3/README.md) |
+| | about 90% | mat-vec over "the roofline", about 800 GB/s | 2026-11-21 | [launch-floor-playbook.md](launch-floor-playbook.md) |
+| 27B mat-vec bandwidth | 650-715 GB/s | large Q8 mat-vecs per card | undated | [HARDWARE-GUIDE.md](HARDWARE-GUIDE.md) section 5, old limits text |
+| | 715 / 685 GB/s | ROCm0 / ROCm1 mat-vec in the profiled critical path | 2026-11-10 | [TOKEN-BUDGET.md](TOKEN-BUDGET.md) |
+| | 760-800 GB/s | best pure stream at the real shapes (a microbench ceiling, not the kernel) | 2026-11-10 | [Q3 microbench](old-ignore/2026-11-10/exp-q3/README.md) |
+| | about 800 GB/s | reached by the repacked mat-vec (28.6 GB at 800 GB/s is 17.9 ms of 26.9 ms) | 2026-11-21 | [launch-floor-playbook.md](launch-floor-playbook.md) |
+| 27B AllReduce share | 6% | critical-path exchange 1.6 ms of 26.7 ms | 2026-11-10 | [TOKEN-BUDGET.md](TOKEN-BUDGET.md) |
+| | 9% | AllReduce kernel time (264 calls x 20 us, 5.3 ms), share of kernel time summed over both GPUs | 2026-11-21 | [launch-floor-playbook.md](launch-floor-playbook.md) |
+| | 4-7 of 27 ms | AllReduce plus post-AR gaps plus peer wait | 2026-10 (A4 row) | A4 in [Hypotheses](#both-models-and-infrastructure) |
+| | 2-2.5 ms | the part of that A4 could reach (exchange 1.62 ms plus part of ROCm1's small-kernel lag) | 2026-11-10 | A4 in [Hypotheses](#both-models-and-infrastructure) |
+| 27B launches per token per GPU | 1595 | decode column, 27B at depth 0 | 2026-11-10 | [TOKEN-BUDGET.md](TOKEN-BUDGET.md) |
+| | 1,645 (3,290 on both GPUs) | traced decode | 2026-11-21 | [launch-floor-playbook.md](launch-floor-playbook.md) |
+| Flash Next launches per token per GPU | 2908 | decode at 8K depth, ROCm1 | 2026-11-10 | [TOKEN-BUDGET.md](TOKEN-BUDGET.md) |
+| | 2,811 (5,621 on both GPUs) | traced decode | 2026-11-21 | [launch-floor-playbook.md](launch-floor-playbook.md) |
+| | about 3280, at about 8 us each | load-excluded profile, before F2 variants | 2026-11-06 | [F2/P4 record][rec-1106-f2] |
+| | 3282 -> 3115 | T1 WIP branch, before F2 | 2026-11-06 | T1 in [Hypotheses](#flash-next) |
+| 27B cost of depth, 2K or 0 to 32K | +6.8 ms per token | llama-cli, plain TG 36.8 -> 29.4 | 2026-11-05 | [records][rec-1105-s] |
+| | 3.17 ms per token | llama-bench depth 0 -> 32K, unprofiled (26.70 -> 29.87) | 2026-11-10 | [TOKEN-BUDGET.md](TOKEN-BUDGET.md) |
+| Profiled TG slowdown | 21-45% | Flash Next 2026-10-29 traces | 2026-10-29 | see [Profiler caveats](#profiler-caveats) |
+| | 7-24% | load-excluded profiles | 2026-11-06 | see [Profiler caveats](#profiler-caveats) |
 
-### Open
+## What worked
 
-Priority order (2026-11-10, from [TOKEN-BUDGET](TOKEN-BUDGET.md)), by expected ms per token saved per effort. Ceilings are critical-path ms, profiled; small-kernel savings shrink without the profiler (roughly 0.6-0.9x). Run one GPU test at a time, with the user's OK.
+Sorted by model, then by effect. Effects are quoted as the source has them. Grades follow the test rules above. "Switch" is the kill switch that turns the change off.
 
-1. K2 `HIP_FORCE_DEV_KERNARG=1` (both): 0-1.1 ms 27B, 0-2.0 ms Flash Next; env only. Test: TG r3 (27B) and r5 (Flash Next) alternating, plus one trace each; go if ROCm1's busy-minus-wait excess (1.09 / 2.02 ms) shrinks.
-2. TB1 tried 2026-11-10: the one-kernel bitonic approach was 1.8-12x slower than the 12 radix launches (see Tried, approach did not work; patch archived). A fused single-block radix kernel is untried.
-3. TB5 / N2 host gap without the profiler (Flash Next, 27B as control): up to about 0.65 ms @8K, more at long context; measurement only. Test: host timestamps around graph compute; go if Flash Next's per-token host time exceeds 27B's by >= 0.3 ms.
-4. ~~B1~~ landed 2026-11-10: 14.9 vs 28.8 us/call, Flash Next TG +4.0% (see Landed).
-5. TB2 HC launch reduction (Flash Next): 1.0-1.5 ms; M. Test: per-kernel `dsv4_hc_*` times from one FN trace; go if the launches to remove sum to >= 1 ms.
-6. TB3 fused GDN decode (both): 27B about 1.5 ms, Flash Next about 1.2 ms; M-L. Test: per-layer recurrent kernel list from one 27B trace; go if >= 8 kernels under 6 us; check upstream first.
-7. SP1 GPU sampling under `-sm tensor` (27B speculative and server): 1.5-3 ms per MTP2 step (0.6-1.2 ms per token); M. Test: `perf record -g` of the llama-server host thread during `spec_accept.sh`; go if sampling is >= 1.5 ms per step.
-8. P1 q8_1 and `scale_f32` passes (Flash Next): 1.0-1.5 ms; M. Test: kernel counts of `quantize_q8_1` and `scale_f32` per token in a new trace (the old counts predate F2).
+| Id | Change in plain words | Model | Measured effect | Grade | Switch | Record |
+| --- | --- | --- | --- | --- | --- | --- |
+| F2 | Fused hyper-connection mix op `GGML_OP_DSV4_HC_MIX` for 1-8 tokens (3 launches instead of 7) | Flash Next | TG128 @8K 40.8 -> 46.0 (+12%, 2 rounds); MTP3 100K step time 52.2 -> 49.5 ms; KLD at `-ub 8` 4.4e-3 (noise floor). Not tuned for T=4 (47 us per call). Order of the 2 rounds not given | B | `GGML_CUDA_HC_MIX_FUSED=0` | [F2/P4][rec-1106-f2] |
+| P4 | Tiled split-K F32 GEMM for small-M matmuls on GCN (rocBLAS is slow for these) | Flash Next | PP2048 @8K 508.9 -> 563.8 (+11%), PP512 +12%, TG unchanged; KLD 4.7-5.1e-3 (noise floor). Dispatch guards still open | B | `GGML_CUDA_SGEMM_F32=0` | [F2/P4][rec-1106-f2] |
+| L-RPK | Repack Q5_0 and IQ4_XS on gfx906 | Flash Next | UD-Q3_K_XL @8K +2.3% TG, about +6% PP; UD-IQ4_XS +3.5% TG, +9% PP; PPL unchanged. Baseline PP had one outlier; native Q5_0 not timed separately | B | `GGML_CUDA_REPACK_CONVERT=0` | [big quants][rec-1106-q] |
+| S2 | Cheaper IQ sign apply (`iq_apply_signs`) in IQ2_S mat-vec and IQ2_S/IQ3_XXS MMQ tile loads; bit-exact | Flash Next | r5 alternating +5.1% TG, +3.1% PP, same output. measured on the old UD-IQ3_XXS upload | A | none named | [S2][rec-1106-s] |
+| L-GM | Grouped MoE for 2-8 token verify, default on since 2026-11-06 | Flash Next | about 5.9% mean TG (Oct 25, MTP2); UD-IQ3_XXS at 100K: MTP2 48.9 -> 51.8, MTP3 49.1 -> 52.8; byte-identical output. Single runs. Applies to IQ2_S and IQ4_NL expert weights | B | `GGML_CUDA_FLASHNEXT_MOE=0` | [100K][rec-1106-m] |
+| B1 | One-wave MoE routing kernel `topk_moe_wave_cuda<512,10>` (512 experts, top-10, rows <= 8); bit-exact | Flash Next | 14.9 vs 28.8 us per call; TG128 @8K 45.71 -> 47.53 (+4.0%), 4 alternating rounds, r5 | A | none named (other shapes keep the old kernel) | [record](old-ignore/2026-11-10/play-b1/README.md) |
+| L-IQ2 | gfx906 two-row IQ2_S one-token expert path | Flash Next | +2.37% TG in one matched pair; the note says "not repeatability evidence" | B | none named | [IMPROVEMENTS.md](IMPROVEMENTS.md) |
+| U1 (R-CU1) | Unsloth #264 MoE id counting sort for 512 or more tokens | Flash Next | PP2048 at `-ub 2048` 877.4 vs 895.5 (+2.1%); 0.0% at `-ub 512`. Inside noise, not shown (the 18 t/s gap equals the stated Flash Next PP noise) | B | `GGML_CUDA_MOE_COUNTING_SORT=0` | [catch-up 46eb1742d][rec-1121-u] |
+| R-100K | MTP3 with a Q8_0 sidecar at 100K context on UD-IQ3_XXS | Flash Next | 52.2 / 52.5 TG, +26% vs plain; two llama-cli runs (llama-cli TG swings 10-18% with the greedy text). 5-prompt server mean MTP3 59.4 -> 62.7 with F2 | B | none | [100K][rec-1106-m] |
+| R-F2P4 | Result of F2 and P4 at long context | Flash Next, 27B | FN MTP3 at 100K 62.7 vs 27B MTP2 62.5 t/s; different models and acceptance | B | none | [F2/P4][rec-1106-f2] |
+| R-HEAD | Row-first MMQ traversal restored in the official-head port | Flash Next | MTP2 PP / TG 347.97 / 36.77 -> 351.30 / 39.51, identical output; the unrepaired port had PP -28%. Single pair | B | none | [earlier checks][rec-1029-e] |
+| K1 | One `set_rows` for the recurrent conv snapshots | 27B | MTP2 spec_accept 40.38 -> 38.95 ms/step (-3.5%), mean TG 62.4 -> 64.7, same acceptance. One pass each way; Flash Next not measured | B | `GGML_K1_STATE_STORE=0`, `GGML_K1_SET_ROWS_VEC=0` | [F2/P4][rec-1106-f2] |
+| L-AR | AllReduce slab overlap | 27B | PP2048 651 (off) -> 682 (4 slabs), text identical; TG neutral in the 2026-10-29 sweep. PP not re-measured on the rebuild tree | B | `GGML_CUDA_AR_SLABS=0` (default 4) | [A1 sweep][rec-1029-a1] |
+| L-MTP | MTP2 with `--spec-draft-backend-sampling` as the speculative default | 27B, Flash Next | 27B +68% vs plain, Flash Next +33%; one run each. Best depth flips between single runs (MTP2, MTP3, DFlash5) | B | flags | [rebuild][rec-1029-rb] |
+| R-32K | Speculative mode by prompt length | 27B | DFlash5 best at a 2K prompt (67.4 / 67.7), MTP2 best at 32K (42.7 vs 39.9); one or two llama-cli runs, crossover not measured | B | flags | [27B sweep][rec-1105-s] |
+| R-IN1 | All Inkling work of 2026-11-21 together | Inkling 2 Mini | IQ4_NL PP2048 564.2 -> 878.6 (+55.7%), TG128 36.28 -> 47.75 (+31.6%); NVFP4 490.8 / 30.5 (merge-alone build, not alternated) -> 836.3 / 45.80 (+70.4% / +50.2%) | A (NVFP4 old column B) | per change below | [late record][rec-1121-late] |
+| R-IN4 | Banded relative-bias attention inside the tile kernel (port of unsloth #386 plus a gfx906 path), default on for prefill | Inkling 2 Mini | IQ4_NL PP2048 ub 512: 775.4 / 879.6 (+13.4%); ub 2048: 772.9 / 1135.7 (+47%); TG unchanged by design; 16K compute buffer 8,665 -> 3,170 MiB (B) | A | `LLAMA_INKLING_BANDED_ATTN=0` | [late record][rec-1121-late] |
+| R-IN6 | NVFP4 experts on the repacked path (layout variant of IQ4_NL, two F16 scales per 32 values) | Inkling 2 Mini | NVFP4 PP2048 637.8 / 737.3 (+15.6%), TG128 37.9 / 45.5 (+20%); costs +1,305 MiB VRAM | A | `GGML_CUDA_REPACK_NVFP4=0` | [late record][rec-1121-late] |
+| R-IN3 | Wide-block `res_mix_f32` and `rms_norm_cat_f32` (were 26.7 us and 11 us per call) | Inkling 2 Mini | IQ4_NL TG128 43.57 -> 47.73 (+9.5%), PP2048 771.1 / 776.9 | A | none for the rewrite (op switches `LLAMA_INKLING_MIX_FUSED=0`, `LLAMA_INKLING_CTRL_FUSED=0`) | [late record][rec-1121-late] |
+| R-IN7a | `CLIP_ROWS` fused op (replaces a 9-kernel clip, 3 per layer) | Inkling 2 Mini | IQ4_NL TG128 36.07 / 39.15 (+8.5%), PP2048 565.3 / 567.6; mean of 2, off, on, on, off | A | `LLAMA_INKLING_CLIP_FUSED=0` | [crash fix][rec-1121-c] |
+| R-IN7b | `RES_MIX` fused op | Inkling 2 Mini | PP2048 568.8 / 751.6 (+32%), TG128 39.54 / 40.45 (+2.3%) | A | `LLAMA_INKLING_MIX_FUSED=0` | [crash fix][rec-1121-c] |
+| R-IN7c | `LOOP_GATE` + `RMS_NORM_CAT` fused ops (12 kernels to 5) | Inkling 2 Mini | PP2048 754.5 / 772.9 (+2.4%), TG128 40.47 / 41.43 (+2.4%) | A | `LLAMA_INKLING_CTRL_FUSED=0` | [crash fix][rec-1121-c] |
+| R-IN7d | `SCONV_RES` fused op (short convolutions, 4 taps) | Inkling 2 Mini | PP2048 774.0 / 777.7, TG128 41.56 / 43.26 (+4.1%) | A | `LLAMA_INKLING_SCONV_FUSED=0` | [crash fix][rec-1121-c] |
+| R-IN2 | Check that 27B and Flash Next did not change | 27B, Flash Next | 27B +0.2% PP and +0.2% TG, Flash Next +0.4% PP and +0.6% TG: no change | A | - | [late record][rec-1121-late] |
+| I-5 | Host-staged AllReduce is the default HIP path (no environment switch) | 27B | AGENTS.md quotes -21% PP2048 and -38% TG256 on two gfx906 for Qwen3.8 27B Q8_0 when HIP is excluded, 2026-09-29. No record of that run was found in vr/ | D (no record found) | none | AGENTS.md |
+| L-GR | Whole-token HIP graph replay | 27B, Flash Next, Inkling | 2026-10-29 trace shows two `hipGraphLaunch` per token (D, no effect number); graphs are active for Inkling generation (B) | D / B | build flag `GGML_HIP_GRAPHS` | [rebuild][rec-1029-rb] |
+| L-PD | Parallel lane dispatch | 27B, Flash Next | off costs "about 1.5 t/s TG on both models"; one repeat per run; inside noise, not shown (Flash Next TG noise is 33.3-40.1) | B | `GGML_META_PARALLEL_DISPATCH=0` | [A1 sweep][rec-1029-a1] |
+| R-FLAG | Build flags `max-ilp` and `-O3` | 27B | a build without them was 2-3% slower in the 2026-10-29 rebuild | B | build flags | [rebuild][rec-1029-rb] |
+| R-CU2-4 | Catch-up merges (4b77dee05, edec462cc, 46eb1742d) | 27B, Flash Next | no regression found: -0.1% / +0.4% (4b77dee05), Flash Next PP +1.3% (edec462cc, cause not verified), 27B 4x16K -2.4% / -1.8% was the cold first run (ABBA repeat); one run each | B | - | [4b77dee05][rec-1105-c], [edec462cc][rec-1118], [46eb1742d][rec-1121-u] |
+| A3 | ROCm1 power cap raised | both | already at its maximum, 178 W (ROCm0 225 W), by sysfs read 2026-11-05; nothing to change | B | - | [records](PERFORMANCE-RECORDS.md#2026-11-05-27b-config-sweep-and-32k-depth) |
 
-Next, smaller or narrower: L2 (27B 0.4-0.7 ms, microbench first), TB4 (Flash Next 0.4-0.7), AR-LL (<= 0.6 / 0.5 ms; the fence-relaxed timing test first), G1 (27B at 32K only, 1-1.5 ms). Low for TG: A5, P2 (recount), S3 (likely obsolete).
+## What did not work
 
-| Id | Idea | Model | Basis | Ceiling | Effort |
+Each entry is a ROUTE (an idea), not a verdict. A lost implementation does not close a route. Every entry gives the theory that predicted a gain, what was really built and how much effort it took, the result, why it lost (marked `tested`, `argued` or `conjecture`), the best-case bound for any implementation, and a status. Many attempts were one quick first version. Grades: A alternated A/B on the real model; B single or one-order measurement or microbench; C estimate; D assertion.
+
+Status words: `OPEN - one implementation lost` (default); `NARROWED` (experiments ruled out named causes); `CLOSED BY BOUND` (the best-case bound is below the noise, or two independent competent implementations failed for the same understood reason); `NOT TESTED` (never built, or a premise check only).
+
+Reference numbers used in the bounds: a launch costs about 2.2 us in the app (A; 1.5 to 1.9 us saved per launch removed by a kill switch; the profiler shows 4.2 us); mat-vec reaches about 800 GB/s per GPU (B); token time and launches per token per GPU: 27B Q8_0 26.9 ms and 1,645, Flash Next 19.8 ms and 2,811, Inkling 2 Mini IQ4_NL 21.0 ms and 4,128 (B, one trace each). TG noise between runs: 27B about +-0.3 t/s when alternated and cool (0.8%); Flash Next about 1 t/s (2%); benchmarks drift 15 to 30% when the GPUs are hot. One thread block runs on one compute unit (1 of 64); a kernel that streams megabytes through one block is far below 800 GB/s (argued; a microbench is running, so this stays a conjecture until its result is added).
+
+### Summary
+
+Counts: 10 OPEN, 10 NARROWED, 6 NOT TESTED, 2 CLOSED BY BOUND (28 routes). Order: OPEN (largest bound first, by share of token time or gain), NARROWED, NOT TESTED, CLOSED BY BOUND. Bounds are best cases for any implementation, not predictions.
+
+| Id | Name | Status | Best-case bound | One-line reason |
+| --- | --- | --- | --- | --- |
+| L-CMOED | MTP draft experts on the CPU | OPEN | up to +17% TG (the MTP2 gain at 32K, B) | one config; CPU sync per step reasoned, not isolated |
+| R-IN8 | One-block Inkling loop controller | OPEN | 2.3 ms per token (11% of 21.0 ms) | one block streams 2.4 MB of weights; a two-kernel form was not built |
+| TB1 | Bitonic top-k for the QSA indexer | OPEN | 0.75 ms (3.8% of 19.8 ms), launches only (C) | one-row bitonic is slower; the fused radix route was not built |
+| M1 | DFlash device feature rows | OPEN | about 2 ms of a 55 ms step (3.6%, C) | upstream path run as is; 200 MiB copy per step |
+| L-Q81 | Multi-row planar Q8_1 producer | OPEN | 0.29 ms (1.1% of 26.9 ms) | cost moved into the norm kernel; no numbers kept |
+| L-UB4K | Ubatch 4096 for 27B PP | OPEN | 0.3% of PP | one sweep point, cause not known |
+| R-IN5 | Unsloth banded kernels alone (Inkling PP) | OPEN | realised by another kernel: PP +13.4% (ub 512), +47% (ub 2048), A | weak first port looked like a dead idea; a tile-kernel version won |
+| L-SML | `-sm layer` on Flash Next | OPEN | no bound | one run, reason not recorded |
+| L-O12 | Oct 12 small items (five) | OPEN | no bound | five items, three numbers, no reasons |
+| L-NGM | n-gram speculation fallback | OPEN | no bound | one screen run without numbers; user decision on file |
+| Q3 | Faster 27B Q8_0 mat-vec | NARROWED | 1.9 ms (7% of 26.9 ms) | more loads, more rows, k-split lose; block-contiguous read not built |
+| A1-27B | Uneven `-ts` for 27B TG | NARROWED | about 1.1 ms (4%), profiled lag | both directions lose; lag is in small kernels the split does not scale |
+| L-CPY | Avoid the HIP 2D memcpy | NARROWED | about 4% of MTP3 kernel time | the rect copies are tensor-split staging, not a hot path |
+| 27B-ARN | Rewrite `add_rms_norm_mul_f32<1024>` | NARROWED | 0.94 ms (3.5% of 26.9 ms) | not arithmetic-bound, not input-bound; Q8_1 stage costs about 3 us |
+| N2a | Overlap the two lanes' graph launches | NARROWED | 27B idle share 1-4% (0.27-1.1 ms) | stagger is not on the critical path; Flash Next idle share open |
+| N2b | Async staging of small F32 inputs | NARROWED | 0.4 ms (27B, C) | delta about 0 on both models; premise was profiler cost |
+| A7 | Prefill GEMM occupancy | NARROWED | no bound | two variants with spills lose; spills not separated from reuse loss |
+| L-D0 | MTP sidecar on ROCm0 | NARROWED | no bound | the +4% was acceptance; step 49.9 vs 49.5 ms |
+| L-MDR | MTP device rows | NARROWED | no bound | step identical; disables deferred prefill (+18% TTFT) |
+| L-NIGHT | ROCm nightly slows 27B MTP2 | NARROWED | no bound | step 40.28 vs 40.27 ms; drop was acceptance |
+| SP1a | Backend sampling under `-sm tensor` | NOT TESTED | 3.7-7.4% per MTP2 step (C estimate) | aborted at load; no sampling ran |
+| N3 | Two-half prefill AllReduce pipelining | NOT TESTED | +5.7% PP (exposed AR 5.4%, B) | nothing built |
+| T1 | Fewer small launches in Flash Next decode | NOT TESTED | 0.88 ms (4.4% of 19.8 ms) | unfinished WIP, wrong output |
+| F1 | Tensor-split host traffic off blit kernels | NOT TESTED | about 4% of MTP3 kernel time (B) | premise failed; nothing built |
+| Q1 | Fuse AllReduce, add, norm, q8_1 | NOT TESTED | 0.8 ms (3.0% of 26.9 ms) | two partial variants; fold into the AR kernel not built |
+| R-IN9 | Dense bias chain explains the slowdown with context | NOT TESTED | 0.26 ms (0.9%) of the growth | no implementation; explanation retired |
+| N1 | Keep both DFlash draft graphs | CLOSED BY BOUND | 0.7 ms of 80 ms (0.9%) vs spread 4.8% | premise check: draft already replays |
+| L-MGC | Content-keyed meta token graph for the draft | CLOSED BY BOUND | 0.7 ms of 80 ms (0.9%), from N1 | wrong output, then the premise was replaced |
+
+### OPEN routes
+
+#### L-CMOED - MTP draft experts on the CPU
+- Idea: put the draft head's expert weights in host memory so that MTP fits next to a large quant at long context.
+- Why it should help (theory): fit. The plan was to free GPU memory; no speed theory is stated. The reachable gain is the MTP2 gain when the full draft sits on the GPU: 51.5 vs 43.9 plain at 32K, +17% (B, single runs).
+- What was actually built: the existing `-cmoed` switch, one configuration (UD-Q3_K_XL, 64K, Q4_0 draft on ROCm1, experts on CPU, `-ts 0.505,0.495`), single runs. No variant, no tuning, no profile of the CPU step. Archive: the big-quants record.
+- Result: MTP2 34.9 vs plain 43.8 TG (B).
+- Why it lost: conjecture. The record says CPU sync per draft step costs more than speculation gains (reasoned); a related claim that CPU expert layers cost 20-25% was retired because quant and placement changed together (C).
+- Best-case bound: up to the +17% measured at 32K with a full GPU draft (51.5 vs 43.9, B); the CPU step adds cost, so the real gain is lower.
+- Route status: `OPEN - one implementation lost`.
+- A better attempt would: put part of the draft experts on the CPU, or overlap the CPU expert work with the target's verify step, and time the CPU step on its own first. Source: [big quants][rec-1106-q].
+
+#### R-IN8 - One-kernel loop controller for Inkling 2 Mini
+- Idea: fuse the 12-kernel controller chain of the Inkling loop so that fewer launches run per looped pass.
+- Why it should help (theory): 11 launches removed x 2.2 us = 24 us per controller (launch cost A, count B). Over 4 controllers x 24 looped passes that is the bound below.
+- What was actually built: `GGML_OP_LOOP_CTRL`, one 256-thread block per token (used for 1-8 tokens) doing two norms, 64 gate dot products one after another with a tree reduction each, and two 64x2304 projections. First attempt, one variant, no tuning, alternated A/B on the real model. Tests passed (`test-backend-ops -o LOOP_CTRL` 2/2, greedy text equal for about 45 tokens). Archive: [notes](old-ignore/2026-11-21/loop-ctrl-fused/README.md), [patch](old-ignore/2026-11-21/loop-ctrl-fused/loop-ctrl-fused.patch).
+- Result: TG128 40.5 -> 11.7 t/s (A); PP2048 737.5 / 751.5, unchanged (the path is off for large batches).
+- Why it lost: argued. The kernel streams about 2.4 MB of F32 weights through one block. At a one-compute-unit share of bandwidth (800 GB/s / 64 = 12.5 GB/s) that is about 190 us per controller, against a saving of 24 us. Measured cost: (85.5 - 24.7) ms / 96 controllers = about 630 us per controller. The 64 sequential reductions would explain the rest (conjecture; the one-compute-unit share is a conjecture until the microbench result is added).
+- Best-case bound: 11 launches x 4 controllers x 24 looped passes x 2.2 us = 2.3 ms per token, about 11% of 21.0 ms.
+- Route status: `OPEN - one implementation lost`. The one-block form with the matmuls inside it is not worth repeating (argued: its cost is about 3 times the 190 us streaming estimate and about 26 times its saving). A later form that kept the three matmuls and fused only the elementwise parts gave PP +2.4% and TG +2.4% (A); it is in [What worked](#what-worked). The rule for CLOSED BY BOUND is not met (a bound of 11% is far above noise), so the route stays open.
+- A better attempt would: use two kernels, a block per gate value (64 blocks) and then a block per output slice, so the matmuls stay parallel; microbench the two-kernel form first (IK4 in [Hypotheses](#inkling-2-mini)).
+
+#### TB1 - Bitonic top-k for the QSA indexer
+- Idea: replace the 12 radix launches of the decode top-k with a cheaper top-k.
+- Why it should help (theory): the 12 radix launches cost 70-90 us per call (B) and the QSA indexer is 2.5 ms per token (3.0 at 32K) in the 2026-11-10 budget (B, profiled). The archive states no prediction for the bitonic kernel; the implied reasoning is one launch in place of 12.
+- What was actually built: an existing bitonic path (`276834fdb`) enabled for one row up to 16,384 columns; a 31-line patch; the row sits in shared memory padded to a power of two. One variant, default parameters, microbench only (`test-backend-ops perf -o TOP_K`, six widths); the model A/B was not run. Archive: [record](old-ignore/2026-11-10/play-tb1/README.md), [patch](old-ignore/2026-11-10/play-tb1/bitonic-one-row.patch).
+- Result: radix 71-87 us against bitonic 131 (2112 columns), 625 (8256), 883 us (16384) (B).
+- Why it lost: not known. Conjecture: one row is one thread block doing O(n log^2 n) compare steps on one compute unit, the same one-block limit as R-IN8.
+- Best-case bound: launches only, about 11 launches x 2.2 us = 24 us per call; if the 2.5 ms were all top-k at about 80 us per call that is about 31 calls per token, so 31 x 24 us = 0.75 ms, 3.8% of 19.8 ms (C; assumes the 2.5 ms is all top-k and mixes a profiled and an unprofiled base).
+- Route status: `OPEN - one implementation lost`; route 2 (a fused radix kernel) was not built (TB1 route 2 in [Hypotheses](#flash-next)).
+- A better attempt would: keep the radix work and fuse the 12 passes into one single-block kernel (the row is 8-64 KB, so it may fit in LDS), then time it against the 12-launch version.
+
+#### M1 - DFlash device feature rows
+- Idea: keep the DFlash feature rows on the device so that the host copy of the tap rows disappears.
+- Why it should help (theory): the fork host path saves a small D2H/H2D tap copy; the archive expects a gain below 1-2 ms of a 55 ms step (C).
+- What was actually built: nothing new. The upstream switch `LLAMA_DFLASH_DEV=1` was run on 27B as is, one run, shared host (plain TG was 16.7-17.4 t/s instead of about 37, so compare ms/step only). Archive: [record](old-ignore/2026-11-10/exp-spec/README.md).
+- Result: 128.07 vs 55.03 ms/step, 2.3x slower (B).
+- Why it lost: argued. Under `-sm tensor` the buffer is a mirrored meta tensor; the draft runs on ROCm0 alone, so the scheduler copies the whole 200 MiB (2048 x 5 taps x 5120 x F32, about 210 MB) to ROCm0 for every draft decode. Found by reading the code; no experiment isolates it.
+- Best-case bound: about 2 ms of a 55 ms step (3.6%, C, from the archive); DFlash5 reps agreed within 0.3 ms (0.5%).
+- Route status: `OPEN - one implementation lost`.
+- A better attempt would: expose the ROCm0 simple tensor of the mirrored meta tensor as the feature source (today `ggml_backend_meta_buffer_simple_tensor` is static) and remove the draft's host wait on the target's written event.
+
+#### L-Q81 - Multi-row planar Q8_1 producer (Oct 12)
+- Idea: quantize several activation rows to Q8_1 in one launch for the narrow-batch (MTP verify) mat-vec.
+- Why it should help (theory): the work log says it halves the quantize launches; no number is given.
+- What was actually built: one variant, a multi-row planar producer for 2-8 rows; it was reverted. A planar quantize kernel that replaces quantize + convert was kept. No numbers, no patch kept. Archive: [Oct 12 log](old-ignore/2026-10-12/notes/2026-10-12-work-status.md), lines 33 and 50.
+- Result: "halved quantize launches, norm kernel slower by the same amount"; no numbers (D).
+- Why it lost: argued, from a later measurement. A separate quantize costs 4.2 us and the fused epilogue costs 3.5 us inside the norm kernel (7.1 + 4.2 = 11.3 us against 10.6 us fused, [Q1 record](old-ignore/2026-11-10/exp-q1/README.md), B), so moving the quantize into the norm kernel moves the cost rather than removing it.
+- Best-case bound: for plain 27B TG, 133 `quantize_q8_1` launches per GPU (266 both GPUs, B) x 2.2 us = 0.29 ms, 1.1% of 26.9 ms, if the added kernel time were zero. This is above the 0.8% noise but small.
+- Route status: `OPEN - one implementation lost`.
+- A better attempt would: write Q8_1 from the producer's own epilogue where the data is already in registers, in place of a separate norm-block step (see the playbook q8_1 items in [Hypotheses](#flash-next)).
+
+#### L-UB4K - `-b/-ub 4096` for 27B PP
+- Idea: a larger ubatch reads the weights fewer times per prompt.
+- Why it should help (theory): no stated theory. A weight-reuse argument: per GPU about 14.3 GB of weights are read once per ubatch, 17.9 ms at 800 GB/s, which is 0.6% of the 2.99 s that 2048 tokens take at 684 t/s (C).
+- What was actually built: one `llama-bench` sweep point, `-b 4096 -ub 2048,4096`, r3. No profile of why. Archive: [27B sweep][rec-1105-s].
+- Result: PP4096 r3: 606.3 +- 3.2 vs 684.1 +- 1.6 at ub 2048 (-11.4%) (A).
+- Why it lost: not known.
+- Best-case bound: doubling the ubatch halves a 0.6% weight-read share, so at most about 0.3% of PP (arithmetic above, C); r3 spread is 0.2-0.5%.
+- Route status: `OPEN - one implementation lost`; the bound is small, so the route has little left to give.
+- A better attempt would: nothing obvious for PP speed; if the larger ubatch is wanted for another reason, profile which buffer or kernel grows.
+
+#### R-IN5 - Unsloth banded attention kernels alone for Inkling 2 prefill
+- Idea: compute the relative bias inside the attention kernel instead of building a dense bias.
+- Why it should help (theory): the dense bias chain is about a quarter of prompt kernel time (B, one trace).
+- What was actually built: a port of unsloth #386 with its scalar and per-query kernels on HIP, because its fast prefill kernel needs NVIDIA matrix units. First port, one variant, alternated A/B. Record: [late record][rec-1121-late].
+- Result: PP2048 761 -> 383 t/s (-50%), TG 47.3 / 47.5 (A).
+- Why it lost: argued. Prompt attention is real work and the fallback handles one query at a time. PP2048 at 761 t/s is 2.69 s and at 383 t/s is 5.35 s, so 2.66 s extra per 2048 tokens against about 0.16 s of attention before (the 0.16 s figure came with the task; I did not find it in a record). That is roughly 18 to 20 times slower than the fork's tile kernel on the attention itself.
+- Best-case bound: realised by another kernel. The same day a bias lookup inside the fork's own tile kernel gave PP +13.4% at ub 512 and +47% at ub 2048 (A), now default (see [What worked](#what-worked)).
+- Route status: `OPEN - one implementation lost`. This is the example of a weak implementation that looked like a dead idea: the idea won with a different kernel.
+- A better attempt would: nothing more for prefill. For decode see R-IN9 and IK1 in [Hypotheses](#inkling-2-mini).
+
+#### L-SML - `-sm layer` instead of tensor split on Flash Next
+- Idea: run layers split across the GPUs and skip the AllReduce.
+- Why it should help (theory): no stated theory. The AllReduce kernel is 11% of Flash Next kernel time (B, one trace), which a layer split would remove.
+- What was actually built: one `llama-bench` run with `-sm layer`, default parameters. Archive: [A1 sweep][rec-1029-a1].
+- Result: 30.99 vs 38.94 TG (-20%), one run, outside the noise (B).
+- Why it lost: not known. Conjecture: with a layer split one GPU works at a time, so the weight stream per token is not halved per GPU.
+- Best-case bound: no bound (the AllReduce share is 11% of summed kernel time, but the cost of serial layers was not measured).
+- Route status: `OPEN - one implementation lost`.
+- A better attempt would: nothing obvious; a layer split with two requests in flight (a pipeline) is a different use case.
+
+#### L-O12 - Oct 12 small items (five)
+- Idea: five separate small ideas, run in one session: MTP fused catch-up, `nc` mat-vec unroll 2, `GGML_RP_NC_FUSION` (fused up/gate in the narrow mat-vec), MTP `p-min`, DFlash mirrored output head.
+- Why it should help (theory): no stated theory in the log for any of them.
+- What was actually built: each was one quick variant in one afternoon, mostly reverted, no patches kept. Numbers exist for three: MTP fused catch-up TG 51.0 vs 51.8 with the same acceptance (catch-up was already overlapped with host sampling); `p-min` TG 55 -> 29-31 (mtp3_p5 30.7, mtp4_p6 28.6); `GGML_RP_NC_FUSION` "no gain". Unroll 2 "worse, dropped"; the DFlash mirrored output head has no entry in the log. Archive: [Oct 12 log](old-ignore/2026-10-12/notes/2026-10-12-work-status.md).
+- Result: as above, grade D (single runs in a log).
+- Why it lost: not known for `p-min` (a drop of that size suggests a defect in the switch; conjecture). For the catch-up: argued from the log, the work was already hidden behind host sampling.
+- Best-case bound: no bound.
+- Route status: `OPEN - one implementation lost` (five routes in one entry; none was tuned).
+- A better attempt would: take them one at a time with a kill switch and an alternated A/B; check `p-min` for a defect before reading it as a result.
+
+#### L-NGM - ngram-mod speculation as a fallback when no MTP head is loaded
+- Idea: use n-gram drafting when a model has no draft head.
+- Why it should help (theory): no stated theory.
+- What was actually built: one screen (n512, Oct 12) of `ngram-mod` alone. No numbers, no archive beyond one line in the [Oct 12 log](old-ignore/2026-10-12/notes/2026-10-12-work-status.md).
+- Result: "ngram-mod alone = plain speed" (D).
+- Why it lost: not known. The decision was the user's (rejected 2026-10-29; the record says do not propose it again), and that decision stands.
+- Best-case bound: no bound.
+- Route status: `OPEN - one implementation lost`; kept open here because no experiment closed it. The user decision is on file.
+- A better attempt would: nothing obvious unless the user reopens it.
+
+### NARROWED routes
+
+#### Q3 - Faster 27B Q8_0 mat-vec
+- Idea: close the gap between the repacked Q8_0 mat-vec and the streaming ceiling.
+- Why it should help (theory): the best pure stream at the real shapes is 760-800 GB/s and the kernel is at 715 / 685 GB/s, so up to 10-11% headroom (B, microbench).
+- What was actually built: a standalone microbench (`mvbench.hip`, real kernel, 16 layers, 108 mat-vecs, 5 passes) with variants: 2 to 5 loads in flight, 4 and 16 rows per block, k-split 2/4/8 (all but k-split bit-identical), a row-shaped stream with no math; plus one end-to-end A/B of `GGML_RP_MMV_ROWS` 8 vs 4 (alternating r3). The block-contiguous read with an LDS per-row re-reduce was tested as a stream, not as a kernel. Archive: [record](old-ignore/2026-11-10/exp-q3/README.md), [microbench](old-ignore/2026-11-10/exp-q3/mvbench.hip).
+- Result: best pure stream 760-800 GB/s, kernel at 89-90% of it; 2-5 loads in flight -1 to -18%, 4 / 16 rows -1 / -70%, row split -3 to -40%; `GGML_RP_MMV_ROWS=4` 37.52 vs 37.45 TG (+0.3%, A, noise) (B for the microbench rows).
+- Why it lost: tested for load depth and the dp4a math: a row-shaped stream with no math reaches 770-797 GB/s against the real kernel's 775 on the head matrix, so the gap is the one-row-per-wave access pattern and launch ramp. More loads and rows cost VGPRs and occupancy (argued from the numbers; U=5 590 vs 715 GB/s).
+- Best-case bound: about 1.9 ms per token (C, the archive's figure), 7% of 26.9 ms; against 0.3 t/s noise (0.8%) it is above noise.
+- Route status: `NARROWED`: more loads in flight, more rows per block, k-split and the math itself are ruled out as the cause of the gap. The block-contiguous read is untested.
+- A better attempt would: build the contiguous per-block read with an LDS re-reduce as a real bit-exact kernel in `mvbench.hip` (Q3 route 2 in [Hypotheses](#27b-q8_0)). The knob `GGML_RP_MMV_ROWS` was removed 2026-11-21; the [knobs archive](old-ignore/2026-11-21/knobs/) has the patch.
+
+#### A1-27B - Uneven `-ts` for 27B TG
+- Idea: give the faster GPU (MI60, ROCm0) a larger share.
+- Why it should help (theory): no stated theory. The older claim that the MI60 is 10-20% faster has no source (D, retired); a profile gives ROCm1 busy time 1.09 ms above ROCm0 per token (B, profiled).
+- What was actually built: a sweep of five splits with `-ts` (0.52/0.48 with two retests, 0.48/0.52, 0.56/0.44; Oct 12: 53/47 and 56/44), single or r2 runs, no profile of the split and no change of the small kernels. Archive: [A1 sweep][rec-1029-a1].
+- Result: 0.52/0.48 about -1 t/s (initial and two r2 retests: 36.20, 36.06, 36.16 vs 37.42, 37.13, 37.01), 0.48/0.52 -1.9 (35.52 vs 37.39), 0.56/0.44 -2.5 (34.92 vs 37.40); Oct 12: 53/47 35.6 and 56/44 34.8 vs 36.8 at 50/50, with PP 702.2 and 704.1 vs 683.6 (+2.7%, +3.0%) (A for TG).
+- Why it lost: not known. Conjecture: the lag is in small kernels that both ranks run whole, so a split of the weights does not scale it.
+- Best-case bound: the lag, about 1.1 ms of 26.9 ms (4%, B profiled; half of the profiled wait was profiler cost). A split does not divide the small kernels (conjecture).
+- Route status: `NARROWED`: shifting work in either direction lowers TG, so imbalance in the weight work is not the cause.
+- A better attempt would: target the cause, the small kernels on ROCm1 (K2, P3 in [Hypotheses](#27b-q8_0)); an uneven split for PP is a separate test (+3% PP for -5% TG on Oct 12).
+
+#### L-CPY - Avoid the HIP 2D memcpy in `ggml_cuda_cpy`
+- Idea: use copy kernels in place of `hipMemcpy2D` for rect copies.
+- Why it should help (theory): a profile showed `__amd_rocclr_copyBufferRectAligned` at 15.6% of PP and 19% of MTP3 kernel time (B).
+- What was actually built: copy kernels in place of the 2D memcpy, alternated r2 x2 on Flash Next UD-IQ3_XXS at 8K. Archive: [100K record][rec-1106-m].
+- Result: PP 515.5 vs 515.4, TG 40.53 vs 40.37 (A).
+- Why it lost: tested. A load-excluded profile showed the time was the load-time weight upload (`set_tensor_2d`); runtime rect copies are about 4% of MTP3 kernel time (B, [F2/P4 record][rec-1106-f2]). The rect copies come from tensor-split staging (argued).
+- Best-case bound: about 4% of MTP3 kernel time (B); not below Flash Next noise (2%), so it is not a closure.
+- Route status: `NARROWED`: the hot-path premise is ruled out; see F1 for the staging traffic.
+- A better attempt would: avoid the tensor-split staging copy at its source (F1).
+
+#### 27B-ARN - Rewrite `add_rms_norm_mul_f32<1024>` (27B, 264 calls per token, 11.3 us in the trace)
+- Idea: make the fused add + norm + mul kernel as cheap as a plain row norm.
+- Why it should help (theory): the data it touches is about 85 KB (0.1 us at full bandwidth), so the excess over the 4.2 us trace floor looked structural, as in `res_mix_f32` (26.7 us to about 5 us after a rewrite; TG +9.5%, A). Grade C by analogy.
+- What was actually built: three micro-variants in about 30 minutes by one agent, profiled under `rocprofv3`, not benchmarked end to end; the patches were not kept (a gap; see the [note](old-ignore/2026-11-22/add-rms-norm-variants/README.md)). This is a quick, incomplete attempt. Earlier, Q1 also tried an unrolled epilogue (12.6 / 13.2 us).
+- Result (B): registers 512x10: 14.8 us; float4 per thread 256x8 with branch-free loads: 11 to 13.5 us; same with a reciprocal in place of the divide: 10.7 to 11.5 us; baseline 11.3 us; without the Q8_1 output: 8.2 us.
+- Why it lost: the premise was wrong on inspection: the kernel already used one wide block, warp reductions and one barrier, and the 4.4 us comparator (`rms_norm_f32<float, 32, ...>`) is a different instantiation doing a different job. Tested: not arithmetic-bound (divide vs reciprocal, no change), not input-volume-bound (reading a for b, no change); the Q8_1 stage costs about 3 us. Conjecture: a one-block kernel is limited by one compute unit.
+- Best-case bound: (11.3 - 4.2) us x 132 calls per GPU = 0.94 ms per token, about 3.5% of 26.9 ms, if it reached the trace floor. Above the 0.8% noise.
+- Route status: `NARROWED`: arithmetic and input volume are ruled out.
+- A better attempt would: first measure the cost of a one-block kernel against the elements it touches (microbench running), then try the Q8_1 stage as a wave per row group or as part of the consumer. Related: Q1, and the 27B row in [Hypotheses](#27b-q8_0).
+
+#### N2a - Overlap the two lanes' graph launches
+- Idea: launch lane 1's graph from a worker thread so that lane 1 does not start about 2 ms after lane 0.
+- Why it should help (theory): in a trace `hipGraphLaunch` blocked about 2.0 ms per lane, serial, and ROCm1 started about 2 ms after ROCm0 (B, profiled; the profiled TG was 25.3 against 36.6 unprofiled).
+- What was actually built: launching lanes 1.. on the existing dispatcher worker threads (a 53-line diff); output byte-identical; one pair, r2. Archive: [diff](old-ignore/2026-10-29/tg-host-gap/parallel-launch-attempt.diff), [diagnosis](old-ignore/2026-10-29/tg-host-gap/diagnosis.md), [N2][rec-1029-n2].
+- Result: 27B 36.63 +- 0.31 -> 36.67 +- 0.17; Flash Next 39.14 -> 38.78 (-0.4) (B, one pair).
+- Why it lost: conjecture. In a profile the launches overlap but each slows to 1.2 / 2.5 ms (runtime lock contention); the record suggests the stagger is not on the critical path unprofiled. Consistent with the later trace: 27B is 96-99% GPU-busy.
+- Best-case bound: the idle share. 27B 1-4% of 26.9 ms = 0.27-1.1 ms (B, one trace). Flash Next is 83-88% busy, so 12-17% idle (2.4-3.4 ms of 19.8 ms) whose cause is unexplained; no bound for it.
+- Route status: `NARROWED`: the serial launch stagger is ruled out as the source of the 27B idle time. The Flash Next idle share is open (TB5 in [Hypotheses](#flash-next)).
+- A better attempt would: measure the Flash Next idle share with host timestamps around graph compute (TB5).
+
+#### N2b - Stage the remaining small F32 inputs asynchronously
+- Idea: stage all pre-launch input copies through the async path, so that the host does not sync before each launch.
+- Why it should help (theory): about 14 copies and 5 syncs per token on 27B and about 70 copies and 10 syncs on Flash Next before the launch (B, profiled); the archive estimates 0.4 ms (1.5%) on 27B and 1.5-2.5 ms (4-6%) on Flash Next as upper bounds (C).
+- What was actually built: no code. The existing knob `GGML_SCHED_INPUT_STAGING_F32_MAX=1048576` stages every F32 input; TG128 r3, alternating, both models. Archive: [option 1](old-ignore/2026-10-29/tg-host-gap/option1.md); the knob was removed 2026-11-21 ([archived](old-ignore/2026-11-21/knobs/)).
+- Result (B, alternating r3): 27B 37.09, 37.13 vs 37.11, 37.13; Flash Next 38.43, 38.66 vs 38.45, 38.12.
+- Why it lost: conjecture. The record concludes the meta `set_tensor` path is not the cost; the original gap was largely profiler cost (see [Retired claims](#retired-claims)).
+- Best-case bound: 0.4 ms on 27B (C, from the old profile whose gap was mostly profiler cost, so high); the 0.3 t/s noise is about 0.2 ms.
+- Route status: `NARROWED`: the pre-launch host copies are ruled out as the critical path on both models (delta about 0).
+- A better attempt would: batch the input tensors into one staging buffer and one upload per lane, or pipeline the next token's inputs (a design change); test after TB5 shows a host idle share on Flash Next.
+
+#### A7 - Higher occupancy in the repacked Q8_0 prefill GEMM
+- Idea: more waves per SIMD to hide latency in the prefill GEMM.
+- Why it should help (theory): no stated theory in the archive; the implied premise is a latency-bound kernel.
+- What was actually built: two variants behind `GGML_RP_GEMM_VAR`: V1 64x64 tile, 256 threads, `launch_bounds(256,3)`, 84 VGPR with 15 spilled; V2 64x64, 512 threads, `launch_bounds(512,4)`, 64 VGPR with 60 spilled; against the baseline 64x128 tile at 126 VGPR. Standalone harness `rpgemm.cpp` on 20 shapes, bit-identical, 3 rounds within 1%; `llama-bench` not run. Archive: [record](old-ignore/2026-11-10/play-a7/README.md), [patch](old-ignore/2026-11-10/play-a7/gemm-variants.patch).
+- Result: GEMM n 2048, k 5120: V1 24-31% and V2 37-57% slower on both GPUs (B); baseline about 26 TOPS (ROCm0), 22.7 (ROCm1).
+- Why it lost: conjecture. The archive reads it as VALU and LDS-issue bound with half the weight reuse and spills; no experiment separates the spills from the lost reuse.
+- Best-case bound: no bound (the GEMM is 76% of the 27B PP critical path, B, but no peak was derived).
+- Route status: `NARROWED`: more waves per SIMD at 64x64 tiles with spills is ruled out; a spill-free occupancy gain is untested.
+- A better attempt would: raise occupancy without spilling (same tile, fewer registers by a different register blocking), or go the other way: larger tiles (TN 3-4) with a shorter BK, as the archive says.
+
+#### L-D0 - Q8_0 MTP sidecar on ROCm0 instead of ROCm1
+- Idea: put the draft on the other GPU.
+- Why it should help (theory): an earlier single-prompt run showed +4%; ROCm0 is the card with the faster GEMM (21%, B). No further theory stated.
+- What was actually built: `-devd ROCm0` with `-ts 0.46,0.54` (the balanced `-ts 0.50,0.50` runs out of memory), 5-prompt server run with F2, one pass. Archive: [F2/P4][rec-1106-f2], [placement data](old-ignore/2026-11-06/f2-p4-accept/draft-placement/).
+- Result: 49.9 vs 49.5 ms/step (+0.9%), acceptance 0.737 vs 0.721 (B).
+- Why it lost: argued. The earlier +4% was an acceptance effect; step time is equal within noise.
+- Best-case bound: no bound.
+- Route status: `NARROWED`: placement speed is ruled out at this memory split; a split that fits is untested.
+- A better attempt would: nothing obvious unless more VRAM is free on ROCm0.
+
+#### L-MDR - MTP device rows (`LLAMA_MTP_DEV_ROWS=1`) on 27B tensor split
+- Idea: keep the MTP hidden rows on the device so that no host copy runs per step.
+- Why it should help (theory): no stated theory (an upstream path).
+- What was actually built: nothing new; the upstream switch, two runs each, alternated. Archive: [record](old-ignore/2026-11-10/exp-spec/README.md).
+- Result: 40.76 / 40.39 vs 40.81 / 40.34 ms/step (+0.0%), same output; TTFT +18% (B).
+- Why it lost: tested. The paths engage (log: `target h rows on the device: yes`) and the step is unchanged, so the host row copy is not on the critical path; deferred prefill is switched off, which raises TTFT.
+- Best-case bound: no bound.
+- Route status: `NARROWED`: the host row copy is ruled out as a cost of the MTP2 step on 27B.
+- A better attempt would: nothing obvious; combining deferred prefill with device rows can at best match the default.
+
+#### L-NIGHT - ROCm 10.3.0a20261105 nightly slows 27B MTP2
+- Idea: a suspected regression, not a speedup: the new compiler might slow 27B.
+- Why it should help (theory): not applicable; the suspicion came from llama-cli 64 -> 55 TG.
+- What was actually built: the same source built with the old and the new clang, one pass each. Archive: [F2/P4][rec-1106-f2].
+- Result: 27B MTP2 40.28 vs 40.27 ms/step, PP2048 712 vs 705, TG 37.8 vs 37.7; Flash Next MTP3 51.4 vs 49.5 (new faster) (B).
+- Why it lost: tested. The drop was acceptance on a different greedy text (0.816 vs 0.777), step time equal.
+- Best-case bound: no bound (a regression check).
+- Route status: `NARROWED`: a compiler slowdown is ruled out for 27B at this noise level.
+- A better attempt would: nothing; recheck after the next ROCm update.
+
+### NOT TESTED routes
+
+#### SP1a - Backend sampling under `-sm tensor`
+- Idea: sample on the GPU with the vocabulary split across lanes, so that the host does not read back about 1 MB of logits per row.
+- Why it should help (theory): without it every draft and target row samples 248,320 entries on the host; the host part of a 27B MTP2 step is about 5 ms (derived, C), est. 1.5-3 ms per MTP2 step (C).
+- What was actually built: the removal of the refusal (a 27-line switch `LLAMA_TP_BACKEND_SAMPLING=1`) alone. It aborted twice at load, so no sampling ran: a tiny PARTIAL tensor broke the AllReduce unit assert (fixed, kept) and then `get_tensor_async` does not read PARTIAL back. Archive: [record](old-ignore/2026-11-18/sp1-tp-backend-sampling/README.md), [patch](old-ignore/2026-11-18/sp1-tp-backend-sampling/tp-backend-sampling-switch.patch).
+- Result: abort at load; nothing measured (B).
+- Why it lost: tested (the abort log shows the cause); the idea itself was not reached.
+- Best-case bound: 1.5-3 ms per 40.3 ms MTP2 step = 3.7-7.4% (C; the CPU sampling share was not timed because `perf` is blocked).
+- Route status: `NOT TESTED`.
+- A better attempt would: build split-aware top-k / argmax (each lane takes its half, merge 2k candidates) and time the host sampler first with host timestamps (SP1 in [Hypotheses](#speculative-decoding)).
+
+#### N3 - Two-half ubatch pipelining of the prefill AllReduce
+- Idea: overlap one half's AllReduce with the other half's GEMM.
+- Why it should help (theory): AllReduce exposed 5.4% of the 27B PP critical path (A6 profile, B); estimate +3-5% PP (C; "3-5% at best").
+- What was actually built: nothing.
+- Result: none.
+- Why it lost: not applicable.
+- Best-case bound: removing a 5.4% exposed share gives 1 / (1 - 0.054) = +5.7% PP (B profile, arithmetic).
+- Route status: `NOT TESTED`.
+- A better attempt would: prototype with pooled memory for two in-flight halves, bit-exact (A6, Q2, N3 in [Hypotheses](#27b-q8_0)).
+
+#### T1 - Fewer small launches in Flash Next decode
+- Idea: remove intermediate `scale_f32`, `quantize_q8_1` and elementwise launches.
+- Why it should help (theory): the WIP cut launches 3282 -> 3115 (-167, -5.2%, B); at 2.2 us that is 0.37 ms (C).
+- What was actually built: an unfinished WIP branch; wrong output from the first token; `llama-bench` crashed after a rebase. No timing.
+- Result: none usable.
+- Why it lost: not applicable (unfinished).
+- Best-case bound: about 400 elementwise-chain launches per GPU per token x 2.2 us = 0.88 ms, 4.4% of 19.8 ms (C; the count is from the Hypotheses text).
+- Route status: `NOT TESTED`.
+- A better attempt would: build one fusion at a time behind a kill switch, check output after each (P1 in [Hypotheses](#flash-next)).
+
+#### F1 - Move tensor-split host traffic off blit kernels
+- Idea: avoid the rect-copy staging in tensor split.
+- Why it should help (theory): `copyBufferRectAligned` looked like 15.6% of PP and 19% of MTP3 kernel time (B).
+- What was actually built: nothing; a load-excluded profile. Record: [F2/P4][rec-1106-f2].
+- Result: the premise failed. The time was the load-time weight upload (`set_tensor_2d`); runtime rect copies are about 4% of MTP3 kernel time (B).
+- Why it lost: tested (the profile window was corrected).
+- Best-case bound: about 4% of MTP3 kernel time (B).
+- Route status: `NOT TESTED` (a premise check).
+- A better attempt would: see L-CPY; the copies are tensor-split staging.
+
+#### Q1 - Fuse AllReduce, residual add, RMS norm and q8_1 quantize (27B TG)
+- Idea: do the post-AllReduce add, norm and quantize in one kernel (ideally inside the AllReduce kernel).
+- Why it should help (theory): an external review estimated 2.5-3.5 ms and 400-500 launches per token, assuming the chain was unfused (C/D); wrong for this tree (it is already one kernel).
+- What was actually built: a profile and two kernel variants, no end-to-end benchmark. B1 unrolled epilogue, row in registers: 12.6 / 13.2 us vs 10.6 / 10.9 us (slower). B2 column split over 5 blocks: not taken at run time, because the in-place ADD/MUL aliasing guard keeps it off (its matching greedy output came from the old kernel). Option (b), folding the work into the AR kernel's phase 3, was not built. Archive: [record](old-ignore/2026-11-10/exp-q1/README.md), patches [unrolled](old-ignore/2026-11-10/exp-q1/unrolled-v1.patch) and [split](old-ignore/2026-11-10/exp-q1/split-v2.patch).
+- Result: the post-AR kernel is 130 x 10.7 us = 1.4 ms per token (B); B1 slower; the fused q8_1 epilogue costs 3.5 us inside the kernel (B).
+- Why it lost: B1: the shuffle chains are not the bottleneck (argued from the timing); B2: aliasing blocks it (tested by a debug print).
+- Best-case bound: at most about 0.8 ms above the launch floor (B), 3.0% of 26.9 ms; above the 0.8% noise.
+- Route status: `NOT TESTED`.
+- A better attempt would: do option (b) together with AR-LL, which rewrites the same kernel (needs a cross-block step in `ggml_cuda_ar_kernel`). Related: 27B-ARN.
+
+#### R-IN9 - The dense bias chain makes Inkling 2 Mini generation slow down with context
+- Idea: make the decode bias cheaper to recover the TG lost at long context.
+- Why it should help (theory): the claim was written in the handoff and the 2026-11-21 late record without a test (D). The arithmetic that was skipped: at 4K context the bias is about 0.4 MB per stage against 16 MB of keys and values, about 2.5% (C, figures from the task text).
+- What was actually built: nothing. It was an explanation, not an implementation.
+- Result: a trace pair showed 93% of the growth in `flash_attn_ext_vec` (15.6 to 85.8 us per call) and no growth in the bias chain kernels (B). TG 36.4 t/s at 4K context untraced; under trace 32.8 t/s at 4K against 37.4 t/s at 16 tokens (B).
+- Why it lost: tested; the explanation is retired (see [Retired claims](#retired-claims)).
+- Best-case bound: the 7% of growth left for everything else is 0.07 x (1/32.8 - 1/37.4 s = 3.75 ms) = 0.26 ms, 0.9% of the traced 30.5 ms token (C, argued from B numbers).
+- Route status: `NOT TESTED`. The live route is IK1 in [Hypotheses](#inkling-2-mini): the decode attention kernel.
+- A better attempt would: see IK1.
+
+### CLOSED BY BOUND routes
+
+#### N1 - Keep both DFlash draft graphs allocated
+- Idea: keep both draft graphs so that the rebuild does not block replay.
+- Why it should help (theory): the old premise was that the rebuild blocks the replay (D).
+- What was actually built: nothing; a premise check with a temporary build counter and HIP-graph logs (27B, DFlash5, 512 tokens). Archive: [N1][rec-1029-n1], [notes](old-ignore/2026-10-29/n1-dflash/notes.md).
+- Result: the draft rebuilds its graph every call (273 builds) at 0.36 ms each, 98 ms of an 8.5 s run (1.1%); the draft already replays through HIP graphs (67 replays, 2 re-captures) (B).
+- Why it lost: tested. The premise predates the single-GPU draft.
+- Best-case bound: about 0.7 ms of an 80 ms step (0.9%) against a DFlash5 spread of 57.3 and 60.1 t/s on equal builds (4.8%).
+- Route status: `CLOSED BY BOUND` (bound 0.9%, below the spread of 4.8%).
+- A better attempt would: nothing obvious.
+
+#### L-MGC - Content-keyed meta token graph cache for the draft (Oct 12)
+- Idea: replay the draft's meta token graph.
+- Why it should help (theory): the draft graph was rebuilt every call with a new uid, so the meta token graph did not replay (Oct 12 log, D).
+- What was actually built: `GGML_META_TG_CONTENT_KEY`, one session step; it replays, but acceptance length fell 2.95 -> 1.1-1.6 (wrong output); the log says "debugging" and the work was not pursued. No patch is archived. Archive: [Oct 12 log](old-ignore/2026-10-12/notes/2026-10-12-work-status.md).
+- Result: acceptance length 2.95 -> 1.1-1.6 (D, archived log).
+- Why it lost: not known (a defect in the key; conjecture). The draft was later found to run as a single-device context that already replays (N1).
+- Best-case bound: the N1 figures: 0.7 ms of an 80 ms step, 0.9%, below the 4.8% spread.
+- Route status: `CLOSED BY BOUND` (through N1; the one attempt failed for an unknown reason).
+- A better attempt would: nothing obvious.
+
+## Hypotheses
+
+Every estimate here is grade C (derived from a profile or a model, not a measured gain). Estimates that were computed at a 4-5 us floor per removed launch are recomputed at the measured 2.2 us and show both numbers. Order in each table: estimated gain per effort, highest first. "Blockers" lists what stops the cheapest test. Host `perf` is blocked on this machine, so tests that need `perf` use host timestamps instead.
+
+### Inkling 2 Mini
+
+What limits it: GPU 98% busy with kernels back to back (B, one trace), so the limit is the launch cost and kernel time on the GPU queue. At 4,128 launches per token the launch floor is about 43% of the 21.0 ms token (C, derived: launches x 2.2 us). Generation also slows with context because one kernel, `flash_attn_ext_vec`, grows from 15.6 to 85.8 us per call (B, one trace pair). Each launch per layer pass removed is worth about 0.1 ms per token (0.5%; 48 passes x 2.2 us, C).
+
+| Id | Idea | Basis | Est. gain (C) | Cheapest test | Blockers |
 | --- | --- | --- | --- | --- | --- |
-| P1 | Remove intermediate `scale_f32` and `quantize_q8_1` passes as one combined change, reusing the existing norm-plus-quantize fusion | Flash Next (the quantize part helps every quantized model) | About 480 `quantize_q8_1` (2.3 ms) and 303 `scale_f32` (1.8 ms) per token on ROCm1, profiled; each scale about 4.2 us with no gap before it, so only kernel time is recoverable | about 2-3.5 ms/token. 2026-11-10 [budget](TOKEN-BUDGET.md) FN@8K: the q8_1 row is 1.50 ms on the critical path (ROCm1; 1.15 on ROCm0) and `scale_f32` sits inside the HC and MoE rows (P1a bound 1.2 ms). The counts in the basis predate F2. Realistic 1.0-1.5 ms profiled; the old range is too high | M; check kernel counts first |
-| F2b | F2 for 2-8 tokens: weight-stationary down/up (load each Q8_0 block once, dp4a against all NT activations); fuse `dsv4_hc_post` with the next `dsv4_hc_mix_prep` | Flash Next MTP | T=4 call 47 us vs 27 us at T=1; post+prep removes 96 launches/token (Fable round 2, [report](old-ignore/2026-11-06/fable-review/round2.md)) | about 1.6 ms per MTP3 step (~3%) + about 0.4 ms (2%). 2026-11-10: the post+prep fusion also acts at T=1; it is part of TB2, which the budget's 3.88 ms HC row makes the largest Flash Next target | S-M |
-| AR-LL | NCCL-LL style AllReduce packets (8 B data + 8 B sequence word) so the peer polls the data, one PCIe trip instead of 2-3; bit-exact | both | `ggml_cuda_ar_kernel` 26.9 us for 5 KB on Flash Next (92/GPU/token, 2.5 ms, part skew), 16.9 us on 27B (129/token, 2.2 ms) (Fable round 2, [report](old-ignore/2026-11-06/fable-review/round2.md)) | Flash Next -1 ms/token, 27B -0.7 ms (3-4%); 2026-11-10 review: ROCm1's 12.4 us/call is the ceiling, LL cannot remove ROCm0's wait, so <= 0.6 ms on 27B. 2026-11-10 budget: critical AR exchange is 1.62 ms (27B@0, 12.6 us/AR), 1.01 ms (FN@8K, 10.5 us/AR), 1.90 ms (G4@0). The Flash Next -1 ms is the whole exchange; corrected to <= 0.5 ms | M; first time a variant of `vr-test-gfx906-tp` with the two system fences per block relaxed (allreduce.cu:171, 182, 200; timing only, not correct): build LL only if it reaches < ~8 us/call. Fold in Q1(b) |
-| FN-A | Weight-stationary grouped expert GEMM for PP: extend `flashnext_moe_grouped` to per-expert token lists from `mm_ids_helper`, 8-16 q8_1 tokens per chunk in LDS, decode each weight once (S1 grid in LDS, S2 signs), dp4a across the chunk | Flash Next PP | Stock `mul_mat_q` IQ gate/up 194 calls x 2.04 ms = 26.4% of PP2048 at about 78 GB/s, about 10 tokens per expert at ub 512 (Fable round 2, [report](old-ignore/2026-11-06/fable-review/round2.md)) | +20% PP at ub 512, more at ub 256 (100K CLI). 2026-11-10 [PP budget](TOKEN-BUDGET.md#tb-pp) FN@0 (591 t/s): `mul_mat_q` gate/up is 365-391 ms per 1K = 22-23% of PP (94 calls per ubatch, about 2 ms each), routed row 34% on the critical path; halving gate/up gives about +12-14%, not +20%. Also seen: about 11% host time between and before ubatches | L; go/no-go microbench of one layer against `mul_mat_q` first; KLD check |
-| T1 | Fewer small launches in Flash Next decode: q8_1 cache keyed on the view root (shared expert reuses the routed-expert quantization), swiglu/unary+mul write q8_1 directly, one l2 norm over q and k | Flash Next | 2026-11-06 WIP branch `impl-t1` (`155750077`): 3282 -> 3115 launches/token/GPU (-5.2%) before F2, but greedy output is wrong from the first token and llama-bench crashes after the rebase. Bisect with `GGML_CUDA_FEWER_LAUNCHES` masks (1 cache key, 2 sigmoid+mul+add, 4 q8_1 producers, 8 l2 merge); the l2 merge on strided q/k is the main suspect | a few % TG. 2026-11-10 budget: FN@8K runs 2908 kernels/token at 8.1 us average on ROCm1; 167 fewer small launches at 4-5 us is about 0.7-0.8 ms profiled (3%) | M; unfinished |
-| P2 | Speed up the tiny float projections: find the shapes behind the 264-call float mat-vec, combine projections that share an input, or use a smaller launch shape | Flash Next | 288 float mat-vecs at about 11 us, 3.1 ms/token | up to about 2 ms. 2026-11-10: the 288 count is from 2026-10-29, before F2 moved the HC down/up into `dsv4_hc_mix_*`; `mul_mat_vec_f` now runs 9.84 us on ROCm1 vs 6.97 on ROCm0. Recount in a new trace before work; likely below 1 ms | M |
-| S3 | Split the hyper-connection down projection along K so it fills 60 CUs | Flash Next | Strata saw 41 blocks at about 100 GB/s; changes sum order, needs a quality check | about 3% (Strata). 2026-11-10: probably obsolete; since F2 the HC down projection is `dsv4_hc_mix_down_f32`, inside the 3.88 ms HC row (see TB2) | M |
-| S4 | One-wavefront-per-row small mat-vec with a 64-lane butterfly, 1-8 columns | mostly Flash Next | Candidate for P2; check our block shape first | unknown | S-M |
-| P3 | Find the late rank before each AllReduce and speed up its preceding work | both | ROCm0 waits in AR 5.19 vs 1.03 ms/token (Flash Next), 4.1 vs 1.7 (27B, Oct 12). 2026-11-10 27B: about half of the profiled wait is a profiler artifact (`hipGraphLaunch` takes about 1 ms under rocprofv3, 18-19 us without). The real lag is about 1.1 ms/token: each small kernel runs about 0.6 us longer on ROCm1 (lower power cap), and mat-vec is only 1.1% slower. Launching lane 1 on the dispatcher thread (code not kept; design in the record) and uneven `-ts` were tried and did not gain TG. [Record](old-ignore/2026-11-10/exp-p3/README.md) | about 1.1 ms on 27B; reach it via fewer small kernels and AR-LL. 2026-11-10 budget (ROCm1 busy minus ROCm0 busy, AR wait excluded, profiled): 27B@0 1.09 ms, FN@8K 2.02, FN@32K 1.95, G4@0 1.36. ROCm1 is the late rank in nearly every segment; on Flash Next small kernels run 20-40% longer on ROCm1 (`mul_mat_vec_f` 9.84 vs 6.97 us, `quantize_q8_1` 5.15 vs 3.93, `k_bin_bcast` 4.73 vs 3.88) while big mat-vecs match. The `-ts` part is validated wrong for 27B ([P3](old-ignore/2026-11-10/exp-p3/README.md)); what is left is K2/A4 (cause) and fewer kernels (each removed kernel saves its ROCm1 time) | M |
-| A5 | Expert parallelism: whole experts per GPU instead of 320-row halves | Flash Next | Needs one 640-row expert to run more than 1.25x faster than two halves. [Assessment](#expert-parallelism-a5) | 1-2 ms/token TG; better for PP. Corrected 2026-11-10: routed experts are 2.58 ms (budget FN@8K). With top-10 routing the busier GPU runs about 6.2 whole experts against 5 equivalent today (+25% critical-path expert work), so a 640-row expert must run > 1.25x faster than two halves to break even; even at 2x the gain is about 1.0 ms, likely 0-0.5. No upstream PRs exist (2026-11-10 search). Low priority for TG | L; go/no-go microbenchmark first |
-| S1 | Stage the IQ codebook grid and the q8_1 activations in LDS in the grouped expert gate/up kernel | Flash Next | Strata found this kernel compute-bound at 110-130 GB/s; ours reach about 150 GB/s useful | part of the 4.7 ms expert union. 2026-11-10 budget FN@8K: routed experts are 2.58 ms on the critical path, so a fraction of that (about 0.5 ms) | M |
-| S5 | Router top-k in one 64-lane wavefront, no barriers | Flash Next | Strata measured block top-k barrier-bound at 43 us/token; ours is inside the 2.41 ms routing plus MoE reduction | needs our kernel time. 2026-11-10 budget: `topk_moe_cuda` 28 us x 48 = 1.35 ms; merged into B1 | S |
-| - | Find the about 10 ms host gap per DFlash step (inject/generate gap, sampling and accept, readbacks) | 27B DFlash | Oct 12 profile; not the draft rebuild (N1) | DFlash5 about 70 t/s if closed (Oct 12 estimate) | trace first |
-| A6 | Re-profile 27B PP on the current tree | 27B | Oct 12 profile predates duplex copies and slabs | decides A7 vs N3. Done 2026-11-10 ([TOKEN-BUDGET](TOKEN-BUDGET.md#tb-pp) 27B@0 PP): 705 t/s; repacked GEMM 76% of the critical path (gate/up 33.5%, down 18.9%), chunked GDN 7.9%, AllReduce exposed 5.4% (276 ms per 1K overlapped). ROCm1 (MI50) GEMM is 21% slower than ROCm0 and sets the pace. Points to A7 | S |
-| L1 | Skip K/V work in `fattn-vec` for wavefronts whose KV rows are all masked; output unchanged | both | +13% decode at 85K context on NVIDIA (optimization lab); nothing at short context | long context only | S; count the masked fraction first |
-| D2 | De-duplicate memory so Flash Next MTP fits at long context: keep one copy of the QSA indexer key cache (588 MiB per GPU at 100K, mirrored today) and of the MoE router (0.23 GiB per GPU), and load the unsloth "shared" drafts (1.8 GiB, borrow the target embedding and head) | Flash Next | Total free VRAM is the limit, not per-GPU placement: `-ts` and `-devd` only move memory between the cards, and splitting the draft does not shrink it. Q3_K_XL at F16 KV has about 2.3 GiB free in total at 32K, 1.2 at 64K, 0.05 at 100K; a Q4_0 draft needs about 2.3-2.5. These changes save about 0.8 GiB at 100K | not enough for 64K or 100K MTP on Q3_K_XL; gives the 32K setup some margin. 100K + MTP needs a smaller target (UD-IQ3_XXS: about 5.9 GiB less in total) | M-L; indexer on one GPU with a top-k broadcast |
-| E1 | Per-expert placement: keep rarely routed experts of each layer on the CPU, hot ones on the GPU | Flash Next IQ4_XS | `-ot` only places whole tensors (all 512 experts of a projection); per-layer CPU offload costs about 1 ms/token per layer in sync | lets IQ4_XS fit with most tokens never touching the CPU. 2026-11-10: upstream's MoE expert cache is in this tree (#29887, #30112 multi-GPU, #31233 policy, #30966 CPU computes misses; `--moe-cache-mib`, `--moe-cache-cpu-share`), but it refuses `-sm tensor` (src/llama-moe-cache.cpp:414) and only caches layers whose experts are all on the host (`-ncmoe` layers). Only layer split / `--fit` use was reported upstream; open ROCm abort #31675 (gfx1030). `-sm layer` costs about 20% on Flash Next, so E1 through the cache needs TP support in `llama-moe-cache` | L; split expert tensors, remap ids. Cheaper first step (S, no code): UD-IQ4_XS `-sm layer -ncmoe 3 --moe-cache-mib N` against `-sm tensor -ncmoe 3` (30.6 TG); if layer + cache wins, TP support is worth M-L |
-| Q2 | Re-profile 27B PP (A6); if blit copies appear, apply F1; then N3 two-half ubatch pipelining so one half's reduce overlaps the other's GEMM | 27B PP | Oct 12: ~20% of the ubatch in AR copies; slabs overlap D2H but not H2D + add (Fable review, 2026-11-06) | +8-12% PP (estimate). Corrected 2026-11-10 by the [PP budget](TOKEN-BUDGET.md#tb-pp): AllReduce exposed on the critical path is 77 ms per 1K (5.4%) for 27B@0 and 3.9% for G4@0, no blit copies; N3 can save at most that, so about +3-5% | M; bit-exact; pool memory for two in-flight halves |
-| D1 | Faster long-context attention on gfx906. With F16 KV and no MFMA/WMMA, `ggml_cuda_get_best_fattn_kernel` picks the generic `TILE` kernel for decode too (2026-11-10 review: F16 KV + mask + padded KV makes `gqa_opt_applies` true, fattn.cu:741-748), and for the 3-token MTP2 and 6-token DFlash5 verify batches. 27B has 6 Q heads per KV head per GPU but `TILE` groups only powers of two (2), so each K/V tile is read 3 times; see G1. Profile both at 32K, then tune or add a small-batch vec path (several query columns per KV pass) | both, all modes | 27B plain TG 36.8 -> 29.4 from a 2K to a 32K prompt: about +6.8 ms/token, most of it attention over the KV cache. MTP2 drops 33% and DFlash5 41%, so the verify batches look worse than decode. [Record](#2026-11-05-27b-config-sweep-and-32k-depth) | up to the 6.8 ms/token depth cost for plain; more for speculative verify. Corrected 2026-11-10 from the [budget](TOKEN-BUDGET.md): llama-bench depth 0 -> 32K costs 3.17 ms/token unprofiled (26.70 -> 29.87), flash attention +2.9 ms profiled; the 6.8 ms llama-cli figure is not reproduced (it may hold depth-dependent host cost; check before use). Plain ceiling at 32K is about 1.5 ms (see G1). At short context `TILE` costs 28 us per call on 27B and 20-27 us on Gemma 4 (0.45 and 1.96 ms/token at depth 0); a vec path near 8 us would save about 0.3 ms (27B) and 1.2 ms (Gemma 4) | M; rocprofv3 at 32K done for plain (budget column 27B@32K); DFlash5 verify still to profile |
-| A4 | Move ROCm1 to CPU-attached PCIe lanes, then test the archived peer-write AR ([patch](old-ignore/2026-11-21/peer-ar/README.md)) and RCCL | both | AR, post-AR gaps and peer wait are 4-7 of 27 ms/token on 27B | largest single lever. 2026-11-10 budget: the reachable part is the AR exchange (27B 1.62, FN 1.01 ms critical) plus ROCm1's small-kernel lag (1.1 / 2.0 ms) if it comes from the chipset link (K2 tells); about 2-2.5 ms on 27B, 2-3 on Flash Next, not 4-7. The post-AR kernel and ROCm0's start-lag wait stay | hardware; run K2 first |
-| - | `mmq-config-gfx906.cuh` is never selected (the `GCN` table wins in `mmq.cuh`) | neither target | 27B uses the repacked GEMM; Flash Next IQ types are not in that table | none for the targets | low priority |
-| M2 | Build the repacked MoE GEMM tile list from the upstream `tile_spec` instead of `repack_tile_off<<<1, 1>>>` | Flash Next PP, other repacked MoE (Q8_0, MXFP4, IQ4_NL) | `repack_tile_off` is one GPU thread that walks all experts in order (512 for Flash Next) for each repacked `MUL_MAT_ID` launch with more than one token. Its loads depend on each other, so it is latency-bound and the GEMM waits for it. The ids helper already runs one block per expert and, since #31047, writes the same per-tile `{expert, col_low, col_high}` list when given a tile width (`BN_ID` or `BN_W32`). Using it removes one serial launch per MoE matmul and part of the fork's `expert_bounds` overload in `mmid.cu` | 2026-11-10 [PP budget](TOKEN-BUDGET.md#tb-pp) FN@0: `repack_tile_off` is 44 calls per ubatch at 65-67 us = 5.7 ms per 1K, 0.34% of PP; the ids helper is 24.5 ms per 1K (1.5%). Upper bound about +0.3% PP | S-M; outputs must match bit for bit, since tile order and contents are the same |
-| SP1 | GPU greedy/top-k sampling under `-sm tensor`: each lane takes top-k over its vocab half, merge 2k candidates (exact for greedy) | 27B MTP2, DFlash, server | `llama_context::set_sampler` (src/llama-context.cpp:2010) refuses backend sampling under `SPLIT_MODE_TENSOR`, so `--spec-draft-backend-sampling` falls back to the CPU sampler on 27B: each draft and target row reads back about 1 MB of logits and samples 248,320 entries on the host. The meta backend already handles top-k over split `result_output` (`GGML_META_TOPK_BCAST_LOGITS`). Flash Next's single-GPU sidecar draft is not affected (2026-11-10 review) | 1.5-3 ms per MTP2 step (4-7%), about 2 ms per DFlash step, about 0.5 ms/token plain server (estimate). 2026-11-10 budget box: the host part of a 27B MTP2 step is about 5 ms (derived: measured step minus estimates), so this fits | M; first `perf record -g` of the llama-server host thread during `spec_accept.sh` Knob removed, archived 2026-11-21, see old-ignore/2026-11-21/knobs. |
-| SP2 | Reduced-vocabulary draft head (FR-Spec style), reusing upstream EAGLE3 `d2t` id mapping (src/models/eagle3.cpp) | both, speculative | The full 248,320-row head is about 75% of each 27B MTP draft decode's bytes and 1.35 GB per DFlash2 step; Flash Next MTP3 drafts each read the 0.68 GB Q8_0 head (2026-11-10 review) | 27B MTP2 -1.5 ms/step (~4%), Flash Next MTP3 -2.5 ms (~5%), DFlash -1.5 ms (~3%) (estimate); target output exact, only acceptance can move. 2026-11-10 budget: LM head 0.88 ms (27B TP) and 0.52 ms (FN TP) per pass; 2 drafts x 0.88 x 87% = 1.5 ms agrees. While SP1 is not done, a smaller head also shrinks the CPU sampling of draft rows | M; CPU-only go/no-go first: share of tokens in the top 32k/64k ids over the spec_accept replies plus a code/prose corpus, go if >= 99% |
-| SP3 | Measure the verify cost curve for 1-8 columns, then re-tune draft depth | both, speculative | Server per-position acceptance (DFlash5 0.775/0.624/0.509/0.425/0.353, MTP2 0.843/0.690) with about 1.7 ms per extra verify column (Oct 12) predicts DFlash7 and MTP3 should win; the earlier llama-cli runs said they lose. Either a cost cliff at 7-8 columns (narrow mat-vec NC=7/8, attention column switch) or acceptance falls faster (2026-11-10 review) | 0-8% | S, no code; `llama-bench -p 1,2,...,8 -n 0 -r 5` on both models |
-| SP4 | Stop charging the deferred DFlash draft prompt replay to generation | 27B DFlash | DFlash5 step is 48.1-49.0 ms on 22-29-token prompts but 60.3-66.9 ms on about 1,750-token prompts (MTP2 39.1-39.6 vs 40.6-43.5): a prompt that fits one ubatch gives the lag-one replay nothing to overlap, so 0.5-1.2 s of ROCm0-only replay lands in generation. The 55 ms/step DFlash figure is therefore a mix of per-step and per-request cost (2026-11-10 review of [exp-spec](old-ignore/2026-11-10/exp-spec/README.md) logs) | +15-25% TG on long-prompt requests (estimate) | S to measure (`LLAMA_DFLASH_DEFER=0` vs default, p1/p2 ms/step and prompt ms), M to fix (split the prompt into 2 chunks, or a TP draft for the replay only). Until then, A/B kernel changes on short prompts only Knob removed, archived 2026-11-21, see old-ignore/2026-11-21/knobs. |
-| G1 | Attention: group all 6 Q heads per KV head in `TILE` (ncols2=6, or 8 with masked padding heads) | 27B, long context and verify | See D1: KV read 3 times at 32K is about 3.2 GB per GPU per token, about 4.5 ms of the 6.8 ms depth cost (fattn.cu:695-699 `gqa_ratio_eff`, fattn-tile.cuh) | up to about 3 ms/token at 32K (~10%), more for verify; about 0 at 2K. Corrected 2026-11-10 from budget 27B@32K: flash attention is 3.34 ms (209 us per layer per GPU) against about 86 us for one F16 KV read (2 KV heads x 256 per GPU, 67 MB at 780 GB/s), 2.4x, so the go rule passes. But three full reads would need about 1000 GB/s, so part of the re-read already hits L2. Ceiling about 1-1.5 ms at 32K (3.34 - 0.45 fixed - 1.37 for one read), 4-5% | M; rocprofv3 at 32K first, go if attention per layer is >= 2x a single KV read; probably not bit-exact, KLD check |
-| L2 | One launch for mat-vecs that share an input (GDN qkv + z + alpha + beta, attention q/k/v) in the repacked Q8_0 path | 27B TG and verify | About 176 launches/token and their ramp/tail; the launch edges are what hold the mat-vec at 89% of the stream ([Q3](old-ignore/2026-11-10/exp-q3/README.md)). Same pattern as the `{MM,MM,GLU}` branch of `ggml_cuda_try_fuse` (2026-11-10 review) | 0.8-1.2 ms/token (3-4%), also every verify. 2026-11-10 budget: TP input projections take 4.60 ms against 4.04 for half of the 1-GPU row (8.07), about 3 us per launch above perfect halving; the 96 tiny alpha/beta launches cost about 4-5 us each. Corrected to about 0.4-0.7 ms | M; microbench in Q3's `mvbench.hip`: 4 separate calls vs one multi-matrix launch. Bit-exact (same per-row math) |
-| K2 | `HIP_FORCE_DEV_KERNARG=1` (kernel arguments in VRAM) | both | ROCm1 runs every small kernel about 0.6 us longer while its mat-vec is only 1.1% slower ([P3](old-ignore/2026-11-10/exp-p3/README.md)); this looks like per-dispatch PCIe latency on chipset lanes rather than the power cap (2026-11-10 review) | 27B 0-1.2 ms, Flash Next 0-3 ms (low confidence). 2026-11-10 budget: ROCm1's extra busy time is 1.09 ms (27B@0), 2.02 (FN@8K), 1.36 (G4@0) profiled, the most K2 (or A4) can recover; Flash Next corrected to 0-2 ms | S, env only; TG r3 A/B plus one trace: does the ROCm1 per-kernel lag shrink |
-| TB2 | Fewer hyper-connection launches at T=1: fuse `dsv4_hc_post` into the next `dsv4_hc_mix_prep` (F2b part 2) and fold `dsv4_hc_mix_down` + `dsv4_hc_mix_up` into one launch (last-block reduction) | Flash Next, plain and MTP | Budget FN@8K: HC row 3.88 ms (14%), the largest Flash Next row: 96 sites x 4 launches, about 10 us per launch on ROCm1. The HC weights are mirrored, so TP does not split this work | 1.0-1.5 ms profiled (2 launches x 96 sites at a 4-5 us floor, plus tails) | M. Go/no-go: per-kernel times of the four `dsv4_hc_*` kernels from one FN trace; go if prep + post + one of down/up sum to >= 1 ms. Sum order must stay or KLD at `-ub 8` |
-| TB3 | Fused GDN decode step: conv, l2 norms, gates, gated delta net and gated norm in 2-3 launches instead of about 13 per layer | both (27B 48 layers, Flash Next 36) | Budget: recurrent row 3.23 ms (27B@0), 2.32 (FN@8K). On one GPU it is 3.46 ms, so it does not halve under TP: latency-bound, about 67 us per layer at 4-5 us per kernel | 27B about 1.5 ms, Flash Next about 1.2 ms profiled (about 10 launches per layer saved); unprofiled maybe 0.7x of that | M-L. Go/no-go: dump the recurrent-segment kernel names and mean us of one layer from a 27B trace (small `token_budget.py` option); go if >= 8 kernels are under 6 us. Check upstream for a fused GDN decode first; KLD if any reduce order changes. Overlaps T1's l2 merge on Flash Next |
-| TB4 | Fold the MoE weighted reduce and the shared-expert add into the routed down mat-vec (one block per output row loops the selected experts) | Flash Next | Budget FN@8K: MoE reduce + combine 1.03 ms on ROCm1 against 0.78 on ROCm0, the largest relative ROCm1 penalty (+33%); 48 layers | 0.4-0.7 ms profiled | M; bit-exact if the expert sum order is kept. Go/no-go: per-kernel times of `moe_weighted_reduction_f32` and the `k_bin_bcast` calls in the FFN segment |
-| TB5 | Flash Next per-token host input prep: measure host time between token graphs without the profiler, then build the QSA k-pool inputs (`pool_mask`, `pool_idxs`, `tail_idxs`, `new_pool_*`) and n-gram ids on the device or reuse them across tokens | Flash Next | Budget: ROCm0's own token-start gap is 0.90 ms @8K and 1.22 @32K against 0.25 / 0.32 on 27B; it grows with the pooled-key count, so it looks like host input work rather than the profiler's slow ROCm1 launch | up to about 0.65 ms @8K, more at long context (estimate) | S to measure (this is the N2 proper test: host timestamps around graph compute), M to fix |
-| W64 | True wave64 small kernels on gfx906: `WARP_SIZE` is a logical 32 in llama.cpp, while the gfx906 wavefront is 64 (`ggml_cuda_get_physical_warp_size()`). Kernels that launch one 32-thread block per row (or 32 x rows) fill half a hardware wave and leave 32 lanes idle, and their 32-lane reductions take an extra step. Rewrite the hot ones for the physical wave (one row per 64 lanes, `__shfl` width 64 or DPP + readlane across the full wave), starting with the B1 routing kernel (512 experts: 8 per lane instead of 16) | both, mostly Flash Next | Found 2026-11-10 in the B1 review: B1 assumed wave64 inside a `WARP_SIZE`-32 launch and mixed two rows per wave. Candidate launch sites with 32-thread blocks: `norm.cu:367/378/525/538` (small-row norm paths), `binbcast.cu:406`, `softmax.cu:377`, `topk-moe.cu:389` (32 x rows; one decode row is half a wave). These are the 4-5 us glue kernels that dominate Flash Next decode ([budget](TOKEN-BUDGET.md): `k_bin_bcast` 249 calls/token, small norms, routing); ROCm1 runs each about 0.6-1 us slower | unknown; per kernel at most the reduction steps and lane waste, so likely 0.1-0.5 us per call, about 0.3-1.5 ms/token on Flash Next if the hot ones gain (estimate) | S-M per kernel. First check: in one Flash Next trace, list kernels whose workgroup size is 32 (rocprofv3 `Workgroup_Size_X`), with calls and time per token. Then microbench the top one as a wave64 variant; must stay bit-exact where the reduction order is kept (a 64-lane tree changes the sum order, so check KLD) |
-| TB6 | Gemma 4: find why the AllReduce after the FFN takes 19.4 us against 11.5 us after attention for the same vector; attention glue 1.67 ms (28 us per layer, 2.5x 27B) | Gemma 4 | Budget G4@0: AR exchange 1.16 vs 0.69 ms; attention misc 1.67 ms; FA see D1 | about 0.5 ms (AR) plus part of the attention glue | S to explain from the per-AR trace times; secondary model, low priority |
-| MU1 | Speculation that scales with busy slots: (a) the server lowers the draft length when several slots verify at once (`get_n_draft_max()` caps only by context and remaining tokens), (b) let the narrow repacked mat-vec take up to 16 columns (`MMQ_RP_Q8_MMV_MAX_TOKENS 8`; 9-127 columns run full 32-wide GEMM tiles) | 27B multi-user (MTP2), Flash Next 2-slot MTP3 | 4 users at 16K: plain 4-way decode 81 t/s (`llama-batched-bench`, kv_rows record), server MTP2 60.9 t/s; 2026-11-11: no draft 43.9 vs MTP2 41.2 aggregate. 4 users x (MTP2 + 1) = 12 columns per verify, above the mat-vec limit; CPU sampling under TP (SP1) adds per-slot cost. Different harnesses, so the gap is not a matched A/B | up to the 81 vs 61 gap (about +30% aggregate at 4 busy users), estimate | S (a), S-M (b). First SP3 extended to 16 columns (`llama-bench -p 1,2,...,16 -n 0 -r 5`), plus a matched server A/B of 4 users with MTP2 against no draft. Output exact for (a); (b) keeps per-column math of the mat-vec path, not bit-identical to the GEMM path it replaces |
-
-A3 (raise ROCm1's power cap) is already in place: sysfs shows ROCm1 (card2) at 178 W, its maximum and default, and ROCm0 at its 225 W maximum (2026-11-05).
-
-Upstream-only candidate: GCN Q8_0 MMQ rows 256 -> 512 threads (discussion 23881: +19% Q8_0 pp512, -6.9% Q4_K, so Q8_0 only). It helps plain upstream, not this fork's repacked path.
-
-Ruled out by analysis (2026-11-10 review): tree verify (48 recurrent GDN layers would need forked state per branch); mirroring Flash Next attention to drop one AllReduce per layer (+1.1 GB read per GPU, no memory left at 100K). From the budget (2026-11-10): running the replicated glue (router and top-k, HC mix, norms, QSA indexer) on ROCm0 only to dodge ROCm1's slower small kernels; ROCm1 needs the results, so each glue block between two mat-vecs would need its own exchange (10-20 us), more than ROCm1's penalty on that block (a few us). Uneven `-ts` cannot fix it either: it moves only mat-vec and expert rows (Flash Next 8 + 2.6 ms), so a 4% shift moves about 0.4 ms against a 2.0 ms ROCm1 lag.
-
-Suggested order (2026-11-10 review; for plain TG superseded by the priority order at the top of this section, the speculative steps still apply): measure first (SP3, SP4, K2 and the G1 32K profile one at a time on the GPUs; SP2 coverage count and the SP1 `perf` check on the CPU in parallel), then build SP1 + SP2 together while L2 and the AR-LL microbench are written without GPUs, then G1 if its profile says go and re-tune draft depth.
-
-### Rejected
-
-- ngram-mod speculation as a fallback when no MTP head is loaded (2026-10-29). The Oct 12 screen also found ngram-mod alone at plain speed.
-
-## What limits each model
-
-### Qwen3.8-27B Q8_0
-
-About 28.7 GB of weights per token (14.3 GB per GPU). At the measured 650-715 GB/s per card for large Q8 mat-vecs, the weight stream takes about 20-21 ms of the 27.2 ms/token, about 75% of the bandwidth roof. Single-GPU TG of 22.76 t/s gives about 45 t/s for perfect 2-way TP. A software-only result of about 40-44 TG is a plausible target; more most likely needs A4. The rest is AllReduce latency through host memory, rank skew and small operations. [Oct 12 dense profile](old-ignore/2026-10-12/notes/2026-10-12-tp-profile-findings.md).
-
-Updated 2026-11-10 from the [token budget](TOKEN-BUDGET.md) (profiled critical path; unprofiled 26.70 ms, 37.45 t/s): mat-vec is 19.3 / 19.5 ms per GPU (68%) at 715 / 685 GB/s, 89-90% of the best stream at these shapes ([Q3](old-ignore/2026-11-10/exp-q3/README.md)), so little is left there. Single GPU is now 23.42 t/s (42.70 ms), so perfect TP would be about 47 t/s; TP gives 1.60x. Against a perfect halving (22.0 vs 28.6 ms profiled) the loss is: small kernels that do not halve (6.2 ms on one GPU, 6.4 per GPU under TP; GDN recurrent 3.2, norm + quantize 2.0, attention glue 1.1), so +3.3 ms; AR exchange 1.6 ms; mat-vec 0.8 ms above half; token-start gap 0.7 ms (mostly profiler). ROCm1's small-kernel lag (1.1 ms) sits inside the small-kernel part. The software levers are fewer small kernels (TB3, L2, Q1 with AR-LL) and the ROCm1 lag (K2, A4); about 40-42 TG is a plausible software target. At 32K the token costs 3.2 ms more (flash attention, see G1). Corrected 2026-11-10: the 75% roof share is about 77% of 26.7 ms.
-
-### Qwen3.8 Flash Next IQ3_XXS (`qwen4exp`)
-
-Flash Next reads about 6x fewer weight bytes per token than 27B but decodes at the same 26-27 ms/token. Its time is mostly fixed per-operation and per-dependency cost, which MoE does not reduce. This is why official llama.cpp matches the fork on Flash Next plain TG: the fork speeds up byte-heavy paths.
-
-| | 27B Q8_0 | Flash Next IQ3_XXS |
-| --- | ---: | ---: |
-| Weight bytes per token | about 28.7 GB | about 4.95 GB |
-| Ideal weight-stream time | about 20-21 ms | about 3.5-3.8 ms |
-| Measured time per token | about 27.2 ms | about 25.7 ms |
-| Share of the bandwidth roof | about 75% | about 14% |
-| 2026-11-10 budget, unprofiled | 26.70 ms (37.45 t/s), about 77% | 22.90 ms @8K (43.68 t/s), about 16% |
-
-Active bytes per token (GGUF tally of revision `c8b5954a88c2`: sum of `ReaderTensor.n_bytes`, `_exps.` tensors x 10/512, embedding tables excluded; canonical storage, not measured HBM traffic):
-
-| Tensor category | Stored GB | Active GB/token |
-| --- | ---: | ---: |
-| 144 routed gate/up/down tensors | 48.63 | 0.95 |
-| Output projection, Q6_K | 0.52 | 0.52 |
-| Everything else except the two embedding tables | 3.48 | 3.48 |
-| Token embedding and the 28.8 GB per-layer n-gram table | 29.32 | a few KB (selected rows) |
-
-Routed experts are only 19% of active bytes; free expert weights would save under 1 ms. (The tally is for the old upload; the budget runs used rev `d96201194f10`.)
-
-Where the time goes, 2026-11-10 [budget](TOKEN-BUDGET.md) at 8K (profiled critical path, 25.6 ms steady; unprofiled 22.9 ms). This replaces the 2026-10-29 list below for planning:
-
-- Fixed-cost glue: hyper-connection mix 3.9 ms (TB2), QSA indexer 2.5 ms (TB1; 3.0 at 32K), router + top-k 1.8 ms (B1), q8_1 quantize 1.5 ms (P1), MoE reduce + combine 1.0 ms (TB4), attention glue 0.5 ms.
-- Mat-vec 7.9-8.3 ms per GPU (31%): input projections 2.7, routed experts 2.6, shared expert 1.4, output projection 0.8, LM head 0.5.
-- GDN recurrent 2.3 ms (TB3); flash attention 0.65 ms (1.46 at 32K).
-- AllReduce exchange 1.0 ms (AR-LL <= 0.5).
-- Token start 2.1 ms on ROCm1 (mostly the profiler's slow launch) and 0.9 on ROCm0 (TB5); warm-up 1.5 ms over 64 tokens.
-- ROCm1 is the late rank in nearly every segment, 2.0 ms/token of extra small-kernel time (K2, A4).
-
-The levers are fewer launches and ROCm1's per-kernel cost. From 22.9 ms, a 3-5 ms cut gives about 50-56 TG.
-
-Where the time went per token on 2026-10-29, from the [profiled trace](#2026-10-29-flash-next-tg-profile) (21% slower than unprofiled, categories overlap, so this is attribution, not a budget):
-
-- Non-expert projections: about 500 Q6_K/Q8_0 mat-vecs (6.4 ms) and about 290 float mat-vecs at about 11 us each (3.1 ms). Each is too small to fill the GPU.
-- Glue kernels: about 480 `quantize_q8_1` (2.3 ms), about 300 `scale_f32` (1.8 ms), routing and MoE reduction (2.4 ms).
-- AllReduce: about 5.3 ms, with rank skew (ROCm0 5.2 vs ROCm1 1.0 ms of AR dispatch time).
-- Attention, hyper-connection mixing and GDN/SSM: about 4.4 ms.
-- No dispatch on either GPU: about 4.3 ms under the profiler (see N2).
-- Routed experts: about 3.4 ms. Each GPU runs 10 half experts of 320 rows; IQ2_S/IQ3 decode reaches about 150 GB/s useful.
-
-Speculation gains less than on 27B (MTP2 +33% vs +68%): each verify token picks its own experts, so batching reuses fewer weight bytes. The levers are operation count and waiting (P1-P3, S1-S5, A5); a measured 3-5 ms cut would give about 41-45 TG. (2026-11-10: plain TG is now 43.7 @8K; see the budget list above for the current figure.)
-
-### Expert parallelism (A5)
-
-Today the meta backend splits every routed expert across both GPUs: `ffn_{up,gate}_exps` take AXIS_1, `ffn_down_exps` AXIS_0 (`src/llama-model.cpp`), and `MUL_MAT_ID` is split like a plain matmul in `ggml-backend-meta.cpp`. Expert parallelism needs an expert-axis split rule, per-lane expert-id remapping in `MUL_MAT_ID`, and matching changes in the repacked and grouped-MoE kernels, expert scales and `ADD_ID` biases. It removes no communication: routed and shared experts already share one AllReduce.
-
-With 10 uniform picks, the busier GPU averages 6.23 whole experts against today's 10 halves (worth 5 whole). EP wins TG only if a 640-row expert runs more than about 1.25x faster than two 320-row halves; real routing is less uniform. PP is the better case, because load averages out over a ubatch. Go/no-go: on one GPU at the real shapes, time 10 experts x 320 rows against 6-7 experts x 640 rows for IQ2_S gate/up and repacked IQ4_NL down. No expert-parallel prior art was found in ggml-org/llama.cpp or ik_llama.cpp (2026-10-29 search, not exhaustive); open an upstream issue before any PR.
-
-2026-11-10: a new search found no upstream expert-parallel PRs. The [budget](TOKEN-BUDGET.md) puts routed experts at 2.58 ms/token on the critical path (FN@8K). EP gives the busier GPU about 6.2 whole experts against 5 equivalent today, +25% expert work on the critical path, so TG gains only above the 1.25x break-even and at most about 1.0 ms even at 2x. Not worth L effort for TG; PP remains the better case.
-
-### Gemma 4 31B Q8_0 (secondary)
-
-2026-11-10 [budget](TOKEN-BUDGET.md) G4@0: 30.60 ms unprofiled (32.68 t/s). Mat-vec 23.0 ms per GPU (70%; gate/up 10.1, down 5.2, input 4.5, output 2.4, head 1.0). Attention is 3.6 ms at depth 0 (glue 1.67, `flash_attn_tile` 1.96 at 20-27 us per call; see D1, TB6), AR exchange 1.9 ms with the post-FFN AR at 19 us against 11.5 us (TB6), ROCm1 lag 1.4 ms.
-
-## Dated records
-
-Newest first. Full commands, identities and raw data are in the linked [old-ignore](old-ignore/README.md) folders.
-
-### 2026-11-21 Inkling 2 Mini, late: NVFP4 repacked experts, banded prefill attention, faster mix kernels
-
-In plain words: the exact NVFP4 file now runs at 836 t/s prompt and 45.8 t/s generation on one GPU (490.8 / 30.5 this afternoon), close to the IQ4_NL file, and long prompts need 5.5 GB less memory. 27B and Flash Next did not change. Code on top of the record below: `06aa25f25` + `d37d86dd7` + `2162c74dd` (banded relative-bias attention, port of unsloth #386 plus a tile-kernel path for gfx906, default on for prefill), `a99a7930b` (wide-block `res_mix` / `rms_norm_cat`), `0ba4be7f1` (NVFP4 experts on the repacked path). Old build `build-u1sort-20261121` (`400989a0d`), new build `build-inkling-final-20261121` (`0ba4be7f1`). `llama-bench -r 2`, order old, new, new, old, below 60C; raw data in `build-inkling-final-20261121/validation/final/`, script [final_validation_2.sh](investigation-notes/2026-11-21-inkling2-mini/final_validation_2.sh). How the wins were found and what is left for each model: [launch-floor-playbook.md](launch-floor-playbook.md).
-
-| Model | Config | PP2048 old | PP2048 new | TG128 old | TG128 new |
-| --- | --- | ---: | ---: | ---: | ---: |
-| 27B Q8_0 | 2 GPUs, `-sm tensor`, ub 512 | 613.5 | 614.5 (+0.2%) | 37.14 | 37.21 (+0.2%) |
-| Flash Next UD-IQ3_XXS | 2 GPUs, `-sm tensor`, ub 512 | 655.0 | 657.7 (+0.4%) | 49.90 | 50.18 (+0.6%) |
-| Inkling 2 Mini IQ4_NL | ROCm0, ub 512 | 564.2 | 878.6 (+55.7%) | 36.28 | 47.75 (+31.6%) |
-| Inkling 2 Mini Q8_0 | ROCm0, ub 512 (1 run each) | 566.1 | 880.1 (+55.5%) | 34.47 | 44.41 (+28.8%) |
-| Inkling 2 Mini NVFP4 + Q8_0 | ROCm0, ub 512 | 490.8 (a) | 836.3 (+70.4%) | 30.5 (a) | 45.80 (+50.2%) |
-
-(a) merge-only build `build-catchup-20261121-e6d6`; the old build cannot run NVFP4. PP2048 at `-ub 2048`, new build: IQ4_NL 1137.7 (old 578.1), Q8_0 1137.3 (old 575.9), NVFP4 1081.1 (merge-only 509.7).
-
-Per change, same binary or two builds, alternated:
-
-| Change | File | PP2048 | TG128 |
-| --- | --- | ---: | ---: |
-| Wide-block `res_mix_f32` / `rms_norm_cat_f32` (26.7 and 11 us per call before) | IQ4_NL | 771.1 / 776.9 | 43.57 / 47.73 (+9.5%) |
-| Banded bias, unsloth scalar kernels only (first port) | IQ4_NL | 761 / 383 (-50%) | 47.3 / 47.5 |
-| Banded bias in the tile kernel, ub 512 | IQ4_NL | 775.4 / 879.6 (+13.4%) | 47.7 / 47.7 |
-| Banded bias in the tile kernel, ub 2048 | IQ4_NL | 772.9 / 1135.7 (+47%) | - |
-| NVFP4 experts repacked (`GGML_CUDA_REPACK_NVFP4=0` / default), ub 512 | NVFP4 | 637.8 / 737.3 (+15.6%) | 37.9 / 45.5 (+20%) |
-
-Banded attention at 16K context (`llama-batched-bench -npp 16384 -ub 2048`): PP 576.5 / 686.9, TG 34.3 / 34.6, compute buffer 8,665 / 3,170 MiB. Small ubatches (token generation) stay on the dense bias; this is why TG does not change and why TG falls with context (36.4 t/s at 4K context against 45.8 at an empty one).
-
-Tried, this approach did not work as a default: the unsloth banded kernels alone. Their fast prefill kernel needs NVIDIA matrix units; on gfx906 only the scalar kernels run and PP halves. They stay as the fallback (decode shapes, quantized K/V, kv_rows); the gfx906 path adds the bias lookup inside `flash_attn_tile`.
-
-Quality (NVFP4 file, `llama-perplexity -c 4096 --chunks 2`, KLD against the first run): the same config twice gives KLD 0 (deterministic). Dense ub 512 vs dense ub 2048: mean KLD 0.0049, same top token 97.8%. Banded vs dense: 0.0055 (ub 512), 0.0060 (ub 2048), 0.0054 (ub 96), same top 97.0-97.6%. NVFP4 repacked vs generic kernels: 0.0054, same top 97.2%, PPL ratio 0.9997 +/- 0.0019. So every change sits at the level this model already moves when only the batch size changes. Open: why a pure batching change moves this model that much (guess: near-tie flips in the top-8 of 128 expert routing). PPL over 8 chunks, dense / banded: IQ4_NL 2.8307 / 2.8305 (ub 512), 2.8288 / 2.8283 (ub 2048); NVFP4 2.8210 / 2.8261; Q8_0 dense 2.8268.
-
-`test-backend-ops` on ROCm0: MUL_MAT 2727/2727, MUL_MAT_ID 1162/1162, FLASH_ATTN_EXT 4420/4420, FLASH_ATTN_EXT_BANDED 71/71, CLIP_ROWS 9/9, RES_MIX 9/9, LOOP_GATE 3/3, RMS_NORM_CAT 6/6, SCONV_RES 12/12. Gap: the harness does not allocate the repack buffer type, so the NVFP4 repacked kernels are covered only by the model-level checks above. Known old failure, not from this work: generic NVFP4 (also Q2_K, Q3_K) MUL_MAT_ID with one token and 2 used experts.
-
-NVFP4 repack memory: ROCm0 weights 16,320 MiB generic, 17,625 MiB repacked (+1,305 MiB): two decoded F16 scales per 32 values against 1 byte per 16 in the file. Untried: keep the raw UE4M3 bytes and decode in the kernel (VRAM-neutral).
-
-NVFP4 server and multi-user, new build, ROCm0: `llama-server` with mmproj Q8_0, `-c 16384`: text TG 37.1 t/s (was 30.4), image request PP 460.0 (was 389.5), TG 35.0, server stays up. `llama-batched-bench -npp 4096 -npl 1,2,4 -ub 2048`: NVFP4 PP 991 / 746 / 559, aggregate TG 36.4 / 51.0 / 87.7; IQ4_NL PP 1032 / 768 / 570, TG 37.5 / 53.5 / 97.1 (IQ4_NL on the old build: PP 507 / 429 / 378, TG 30.6 / 44.7 / 79.2). CPU check (`--device none -ngl 0`) ends without an assert.
-
-Cost model check: steady-state token generation is 98% GPU-busy with kernels back to back; a launch costs about 2.2 us in the app (2.0 us bare on the MI60, 2.6 us on the MI50; `rocprofv3` shows 4.2 us). Captured graphs are active for this model. See the playbook.
-
-### 2026-11-21 Inkling 2 Mini: crash fix, fused ops, NVFP4 baseline
-
-In plain words: Inkling 2 Mini no longer crashes on images, runs about 37% faster on prompts and 19% faster on generation, and now has an exact NVFP4 file. 27B and Flash Next did not change. Code: upstream `e6d624b9a` merged (`4c5738580`), crash fix `ddca7dd9b`, fused ops `3253927e4`, `b6c927fd1`, `f17889023`, `85bb8a0f7`. Old build `build-u1sort-20261121` (`400989a0d`), new build `build-sconvfuse-20261121` (`85bb8a0f7`). `llama-bench -r 2`, order old, new, new, old, start temperature below 60C; raw data in `build-sconvfuse-20261121/validation/final/`, script [final_validation.sh](investigation-notes/2026-11-21-inkling2-mini/final_validation.sh).
-
-| Model | Config | PP2048 old | PP2048 new | TG128 old | TG128 new |
-| --- | --- | ---: | ---: | ---: | ---: |
-| 27B Q8_0 | 2 GPUs, `-sm tensor`, ub 512 | 614.4 | 611.0 (-0.6%) | 37.09 | 37.24 (+0.4%) |
-| Flash Next UD-IQ3_XXS | 2 GPUs, `-sm tensor`, ub 512 | 658.2 | 655.9 (-0.3%) | 50.02 | 50.48 (+0.9%) |
-| Inkling 2 Mini IQ4_NL | ROCm0, ub 512 | 564.2 | 775.1 (+37.4%) | 36.42 | 43.35 (+19.0%) |
-| Inkling 2 Mini Q8_0 | ROCm0, ub 512 (1 run each) | 564.3 | 772.7 (+36.9%) | 34.30 | 40.33 (+17.6%) |
-| Inkling 2 Mini NVFP4 + Q8_0 | ROCm0, ub 512 | 490.8 (a) | 641.0 (+30.6%) | 30.5 (a) | 35.43 (+16.2%) |
-
-(a) The old build cannot run NVFP4 (it lacks #32669 / #32704); this column is `build-catchup-20261121-e6d6` (merge only, no fused ops), measured earlier the same evening, not alternated with the new runs. PP2048 at `-ub 2048` on the new build: IQ4_NL 774.2 (was 578.1), NVFP4 662.1 (was 509.7 on the merge-only build).
-
-Per fused op, Inkling 2 Mini IQ4_NL on ROCm0, same binary with the kill switch off / on (mean of 2, order off, on, on, off):
-
-| Op | Replaces | PP2048 | TG128 |
-| --- | --- | ---: | ---: |
-| `CLIP_ROWS` | 9-kernel q/k/r norm clip, 3 per layer | 565.3 / 567.6 | 36.07 / 39.15 (+8.5%) |
-| `RES_MIX` | concat chain, rms norm, two matmuls, softmax of the block residual mix | 568.8 / 751.6 (+32%) | 39.54 / 40.45 (+2.3%) |
-| `LOOP_GATE` + `RMS_NORM_CAT` | elementwise parts of the loop controllers (12 kernels to 5) | 754.5 / 772.9 (+2.4%) | 40.47 / 41.43 (+2.4%) |
-| `SCONV_RES` | conv, dynamic taps, residual and scale of the short convolutions | 774.0 / 777.7 | 41.56 / 43.26 (+4.1%) |
-
-Greedy text with a switch on and off matches for 35-48 tokens, then can differ by a word (float summation order). `test-backend-ops` on ROCm0: MUL_MAT 2727/2727, MUL_MAT_ID 1152/1152, CLIP_ROWS 9/9, RES_MIX 9/9, LOOP_GATE 3/3, RMS_NORM_CAT 6/6, SCONV_RES 12/12.
-
-Tried, this approach did not work: one kernel for the whole loop controller with its three matmuls, one thread block per token. TG128 40.5 to 11.7 t/s, PP unchanged. A single block cannot stream the controller weights. Untried: two kernels (a block per gate value, a block per output slice). [Patch and notes](old-ignore/2026-11-21/loop-ctrl-fused/README.md).
-
-NVFP4 file (`$MODELS_DIR/inkling2-mini/Inkling-2-Mini-NVFP4-Q8_0.gguf`, 17.57 GB, 18.8 GB VRAM at `-c 4096`): made with `llama-quantize --allow-requantize --tensor-type 'blk\.([0-9]|1[0-9])\.ffn_(gate_up|down)_exps=nvfp4' <Q8_K_XL.gguf_file> <out> Q8_0`. Coherent greedy text. It is 17% (PP) and 18% (TG) behind IQ4_NL / 12% behind Q8_0 on TG, all from the generic NVFP4 expert kernels (rocprof, merge-only build, NVFP4 vs Q8_0: `mul_mat_vec_q<NVFP4>` 8.1 vs 4.6 ms per token; `mul_mat_q<NVFP4>` 2.87 vs 1.72 s per 2048-token prompt; data in `build-catchup-20261121-e6d6/validation/inkling2-mini/nvfp4-speed/`). The 144 BF16 loop controller tensors do not matter (F32 copy: PP 488.5 vs 490.9, TG 30.5 vs 30.65).
-
-NVFP4 server and multi-user, new build, ROCm0: `llama-server` with mmproj Q8_0, `-c 16384`: text 30.4 t/s TG (bench 35.4, so about 4.7 ms per token of server overhead is still unexplained), image request (2750 prompt tokens) PP 389.5, TG 28.5, server stays up. `llama-batched-bench -npp 4096 -npl 1,2,4 -ub 2048`: PP 551 / 475 / 414, aggregate TG 29.7 / 43.7 / 68.6 (IQ4_NL on the old build: PP 507 / 429 / 378, TG 30.6 / 44.7 / 79.2).
-
-Image crash: fork bug, `s_copy_main` / `s_write` not filled for the Inkling input class; see the [handoff](handoff-2026-11-21.md). Check: `llama-completion --device none -ngl 0 -n 6` on the IQ4_NL file ends without the `get_rows` assert.
-
-### 2026-11-21 catch-up to official 46eb1742d
-
-Merge `296a9e2c0` plus build fixes, then cleanup (peer AllReduce archived, about 30 sweep-only env knobs removed) and unsloth #264 (device MoE id counting sort). Builds: `build-merge-20261121` (merge only), `build-cleanup-20261121` (`698f466dd`), `build-u1sort-20261121` (`400989a0d` code, now `build-current`), each against `build-catchup-20261118-134459`. Cooled below 60C, order base/new/new/base, llama-bench r3. Raw data: each build's `validation/`.
-
-| Model | Test | base | merge | cleanup | change (cleanup) |
-| --- | --- | ---: | ---: | ---: | ---: |
-| Qwen3.8-27B Q8_0 | PP2048 | 700.2 / 700.1 | 698.8 | 698.9 | -0.2% |
-| Qwen3.8-27B Q8_0 | TG128 | 37.33 / 37.35 | 37.31 | 37.23 | -0.3% |
-| Qwen3.8-27B Q8_0 | MTP2 server 5-prompt mean | 63.46 t/s, 40.31 ms/step, acc 0.797 | - | 63.92 t/s, 40.02 ms/step, acc 0.797 | ms/step -0.7% |
-| Flash Next UD-IQ3_XXS | PP2048 (-b 1024 -ub 512) | 656.7 / 652.3 | 656.6 | 657.8 | +0.9% |
-| Flash Next UD-IQ3_XXS | TG128 | 50.17 / 50.33 | 50.55 | 50.55 | +0.4% |
-| Flash Next UD-IQ3_XXS | MTP3 server 5-prompt mean | 59.44 t/s, 49.49 ms/step, acc 0.660 | - | 59.04 t/s, 49.81 ms/step, acc 0.660 | ms/step +0.6% (base spread 1.9%) |
-| 27B, 4 users x 16K | PP / 4-way TG | 577.2 / 84.26 | - | 572.8 / 82.24 | -0.8% / -2.4% (one pair, see repeat below) |
-| Flash Next, 4 users x 16K | PP / 4-way TG | 475.6 / 84.66 | - | 486.9 / 85.98 | +2.4% / +1.6% |
-
-Unsloth #264 on the same build (`GGML_CUDA_MOE_COUNTING_SORT=0` vs default), Flash Next: PP2048 at `-ub 512` 657.3 vs 657.0 (0.0%), TG128 50.31 vs 50.32; PP2048 at `-b 2048 -ub 2048` 877.4 vs 895.5 (+2.1%, both on runs above both off runs). MTP3 against the cleanup build: 59.57 vs 59.91 t/s, 49.32 vs 49.08 ms/step, acc 0.660 both; greedy Flash Next text identical. The first port trapped on out of range ids and aborted on ROCm1 under `-sm tensor` (meta expert slices); fixed in `400989a0d`.
-
-27B 4 x 16K repeat, order A,B,B,A, base vs `build-u1sort-20261121`: PP 576.3 / 568.0 vs 566.3 / 571.8 (-0.5%), 4-way TG 85.57 / 82.27 vs 82.27 / 82.46 (-1.8%). Only the first, coldest run (start 49C, others 56-59C) is faster; the last base run equals the new build (82.27), so the drop is the start temperature, not the code. Both pairs ran base first from cold.
-
-TP check pass at n 1 and 2048 for each build; 27B greedy text identical; `test-backend-ops` MUL_MAT_ID, TOP_K, SET_ROWS, GATED_DELTA_NET, GET_ROWS pass on ROCm0 (1152 and 352 cases with #264).
-
-Merge notes: two conflicts (`top-k.cu` ours, `mmid.cu` fork overloads with upstream `ne_store`). Silent traps fixed: `expert_bounds` last entry `nex_prev + n_dumped`, `GGML_OP_COUNT` 101 (upstream SLEEP plus DSV4_HC_MIX), `build_attn_iswa_impl` needs `gctx.build_cpy_k`. Core delta vs upstream: +15276/-1039 in 121 files (was +16426/-995 in 124 against edec462cc), with #264 adding +715.
-
-### 2026-11-18 catch-up to official edec462cc
-
-Build `build-catchup-20261118-134459` (merge 992b4580f, final d7ea110cb) against `build-kvrows-20261116`, same binaries layout, cooled below 60C, order base/new/new/base. Raw data: `build-catchup-20261118-134459/validation/`.
-
-| Model | Test | base | new | change |
-| --- | --- | ---: | ---: | ---: |
-| Qwen3.8-27B Q8_0 | PP2048 (llama-bench r2) | 715.2 / 709.1 | 713.3 / 711.9 | 0.0% |
-| Qwen3.8-27B Q8_0 | TG128 | 37.91 / 37.89 | 37.97 / 37.89 | +0.1% |
-| Qwen3.8-27B Q8_0 | MTP2 server 5-prompt mean | 65.40 t/s, 39.11 ms/step, acc 0.797 | 66.11-66.26 t/s, 38.59-38.68 ms/step, acc 0.797 | +1.1% |
-| Flash Next UD-IQ3_XXS | PP2048 (-b 1024 -ub 512) | 663.7 / 664.3 | 671.9 / 672.9 | +1.3% |
-| Flash Next UD-IQ3_XXS | TG128 | 50.50 / 50.73 | 51.16 / 50.24 | 0.0% |
-| Flash Next UD-IQ3_XXS | MTP3 server 5-prompt mean | 59.17 / 61.00 t/s, 50.87 / 49.31 ms/step, acc 0.682 | 59.14 / 60.05 t/s, 49.68 / 48.94 ms/step, acc 0.660 | ms/step -1.3% |
-| 27B, 4 users x 16K (batched-bench) | PP / 4-way TG | 577.9 / 82.6 | 572.9 / 81.4 | -0.9% / noise |
-| Flash Next, 4 users x 16K | PP / 4-way TG | 474.1 / 83.5 | 478.7 / 84.5 | +1.0% / +1.2% |
-
-TP check pass at n 1 and 2048; 27B greedy text correct. Flash Next greedy text changed (acceptance 0.682 -> 0.660 on the same prompts) while 27B did not; the likely cause is upstream GCN stream-k MMQ (#30022) changing the sum order of the IQ prefill matmuls (27B prefill uses the repacked GEMM). Not verified; a PPL/KLD A/B would settle it.
-
-Merge notes: upstream #31617 removed the HIP shim that took 32-bit masks in raw `__shfl_*_sync`; 7 fork calls now use `ggml_cuda_shfl*`. The generic top-k MoE kernel is now 64-lane on gfx906; the fork's with_norm sum order is kept (bit-identical for n_expert_used <= 32). gfx906 keeps row-first MMQ for dense and MoE.
-
-pi adapter (harness-hub Qwen3.8-27B-pi-adapted, F16 LoRA on 27B Q8_0): runtime `--lora` aborts under `-sm tensor` (`ggml-backend-meta.cpp:900`, no split rule for `lora_a`/`lora_b`); `-sm layer` asks for a 47 GB compute buffer on ROCm0 and fails. Not fixed yet.
-
-### 2026-11-06 F2, P4, toolchain check and acceptance-aware speculative runs
-
-Land the first two Fable-review kernels, check a suspected 27B MTP2 regression, and measure speculative modes without acceptance noise. Kind: A/B experiment and profile.
-
-- Source: `52bcba210` (F2 `0920eb0ac` + P4); baseline `a27e4931e`. Toolchain A/B: same source built with ROCm 10.2.0a20261012 (clang `6da73151`, side venv `~/infer/toolchains/rocm-10.2.0a20261012`) and 10.3.0a20261105 (clang `36c1564f`, the TheRock venv since 2026-11-06 00:33).
-- Model: 27B Q8_0 rev `4ca720788d1e`; Flash Next UD-IQ3_XXS rev `d96201194f10` with the Q8_0 n-gram table, Q8_0 MTP sidecar.
-- Settings: standard; Flash Next MTP3 at ctx 100352, `-ts 0.52,0.48`, draft `-devd ROCm1`, `--spec-draft-n-ubatch 64`.
-- Workload: llama-bench r2; speculative rows from [`spec_accept.sh`](scripts/spec_accept.sh) (5 prompts, 256 tokens, one pass each).
-
-Load-excluded profiles (window after the last gap above 20 ms; rocprofv3 slows TG 7-24%): Flash Next TG runs about 3280 launches per token per GPU at about 8 us each, 86-89% busy, so it is launch-bound; MTP3 at 100K leaves ROCm0 22% idle; Flash Next PP is 33% repacked GEMM, 26% stock `mul_mat_q` for the IQ experts and 19% rocBLAS SGEMM; 27B TG is 70% Q8_0 mat-vec at 94% busy.
-
-| Build | Mode | PP t/s | TG t/s | ms/step | Accept | Change |
-| --- | --- | ---: | ---: | ---: | ---: | ---: |
-| F2 off | Flash Next llama-bench @8K | 514 | 40.8 | - | - | - |
-| F2 on | Flash Next llama-bench @8K | 510 | 46.0 | - | - | +12% TG |
-| P4 off | Flash Next llama-bench @8K (with F2) | 508.9 | 41.8 (tg32) | - | - | - |
-| P4 on | Flash Next llama-bench @8K (with F2) | 563.8 | 41.9 (tg32) | - | - | +11% PP |
-| F2 off, new clang | Flash Next MTP3 100K | - | 59.4 | 52.18 | 0.720 | - |
-| F2 on, new clang | Flash Next MTP3 100K | - | 62.7 | 49.48 | 0.721 | -5.2% step |
-| F2 on, old clang | Flash Next MTP3 100K | - | 60.8 | 51.36 | 0.728 | +3.8% step vs new |
-| F2 on, draft ROCm0 `-ts 0.46,0.54` | Flash Next MTP3 100K | - | 63.2 | 49.94 | 0.737 | +0.9% step |
-| old clang | 27B MTP2 | - | 64.5 | 40.28 | 0.816 | - |
-| new clang | 27B MTP2 | - | 62.5 | 40.27 | 0.777 | same step |
-| old / new clang | 27B llama-bench | 712.1 / 705.2 | 37.77 / 37.71 | - | - | -1.0% PP |
-
-KLD (Flash Next, base = same build, 4 chunks unless noted): `-ub 256` vs `-ub 512` 4.66e-3; `-ts 0.52,0.48` vs `1/1` 4.74e-3; P4 per matmul family 4.7-5.1e-3; F2 at `-b 8 -ub 8` (2 chunks) 4.4e-3; same top token 98.0-98.9% in all, PPL unchanged.
-
-P4 KLD controls: the kernel output matches rocBLAS to about 2e-6 relative (max diff 1e-5 at max |value| 5-60). Running the kernel but keeping the rocBLAS result gives KLD exactly 0 (no side effects). Keeping rocBLAS but scaling `ssm_alpha` by (1 +- 3e-7) gives 4.7e-3, so the model is sensitive to about 1e-6 noise at these sites and any change of F32 sum order lands near 5e-3. All of these are measured against the IQ3 build itself, not a higher-precision reference. Not yet measured: KLD against a Q8_0/BF16 reference with P4 on and off. A Sonnet review found no kernel defects and judged default-on safe. Open on `main`: the dispatch lacks `ne11 <= 65535` (grid y limit), `src0->ne[0] == src1->ne[0]` and a restriction to `hc_*`/`ssm_alpha`/`ssm_beta` by name, so other models' small F32 weights (e.g. MoE routers with under 128 experts) also take this path.
-
-Verdict: F2 and P4 are landed. Flash Next MTP3 at 100K now matches 27B Q8_0 MTP2 (62.7 vs 62.5 mean TG over the same prompts). The new ROCm nightly does not slow 27B; single-prompt llama-cli MTP numbers swing 10-18% with the greedy text and must not be used for A/B. The draft device does not matter (validated wrong). F1, Q1, N3 are validated wrong. T1 is unfinished (wrong output). Not covered: long prompts that fill 100K, DFlash on the new tree, F2 tuning for T=4. Raw: [f2-p4-accept](old-ignore/2026-11-06/f2-p4-accept/).
-
-### 2026-11-06 Flash Next UD-IQ3_XXS at 100K with MTP
-
-Get MTP plus 100K context on a Q3-class Flash Next quant, as fast as possible. Kind: A/B experiment and profile.
-
-- Source: `32a8e415b` plus grouped MoE on by default (this commit); builds `build-conv-20261106` and `build-fnspeed-20261106`.
-- Model: UD-IQ3_XXS rev `d96201194f10` with the Q8_0 n-gram table; draft unsloth `mtp-Qwen3.8-Flash-Next-Q8_0` (sidecar) on ROCm1 (`-devd ROCm1`).
-- Settings: standard Flash Next with ctx 100352, target `-ts 0.52,0.48`, `--spec-draft-n-ubatch 64`. Q3_K_XL does not fit this (see the big-quants record); UD-IQ3_XXS has about 5.9 GiB less in GPU weights.
-- Workload: standard llama-cli, one run each unless noted; llama-bench rows at depth 8192, 2 alternating rounds of r2.
-
-| Build | Mode | PP t/s | TG t/s | Change | Accept | Output |
-| --- | --- | ---: | ---: | ---: | ---: | --- |
-| conv | plain | 407.8 | 41.7 | - | - | `8db6ec2802ff` |
-| conv | MTP2 | 402.6 | 48.9 | +17% | - | `cdc496d26b1a` |
-| conv | MTP2 + grouped MoE (env) | 387.1 | 51.8 | +6% vs MTP2 | - | same as MTP2 |
-| conv | MTP3 | 376.3 | 49.1 | - | - | `3dd833063ecc` |
-| conv | MTP3 + grouped MoE (env) | 439.3 | 52.8 | +8% vs MTP3 | - | same as MTP3 |
-| fnspeed | **MTP3, grouped MoE default (two runs)** | 438.2 / 439.5 | **52.2 / 52.5** | +26% vs plain | - | same as MTP3 |
-| fnspeed | llama-bench plain @8K, copy kernels vs 2D memcpy | 515.5 / 515.4 | 40.53 / 40.37 | none | - | - |
-
-Verdict: grouped MoE is landed as the default (`GGML_CUDA_FLASHNEXT_MOE=0` disables): +6-8% TG on MTP verify, byte-identical output, 132 repack-vs-CPU cases pass. Best 100K setup: MTP3 with the Q8_0 sidecar, about 52.4 TG (27B Q8_0 MTP2 is 64). Avoiding the HIP 2D memcpy in `ggml_cuda_cpy` is validated wrong (no change); the `__amd_rocclr_copyBufferRectAligned` time in that profile (15.6% of PP, 19% of MTP3 kernel time) was the load-time weight upload, which the profile window included (corrected on 2026-11-06, see the [F2/P4 record](#2026-11-06-f2-p4-toolchain-check-and-acceptance-aware-speculative-runs)). Other profile findings: stock `mul_mat_q` for the IQ gate/up experts about 21% of PP; the F32 MoE router (`ffn_gate_inp`, rocBLAS SGEMM at about 1.2 TFLOPS) about 15% of PP. Not covered: long prompts filling 100K, acceptance rates. Raw: [iq3-100k-mtp](old-ignore/2026-11-06/iq3-100k-mtp/).
-
-### 2026-11-06 Flash Next big quants: repack conversion, Q8_0 n-gram table, 100K and MTP fit
-
-Make UD-Q3_K_XL and UD-IQ4_XS (new upload, rev `d96201194f10`) fast, with 100K context and MTP if they fit. Kind: A/B experiment and fit study.
-
-- Source: branch `s2-iq-signs`: S2, Q5_0/IQ4_XS repack (conversion `ebd76ced1`, then native Q5_0 `3e19b6adc`); build `build-conv-20261106`.
-- Model: UD-Q3_K_XL and UD-IQ4_XS; "Q8_0 table" = the unsloth `engram/` Q8_0 n-gram table swapped in as shard 4 (`~/models/flashnext/`). Drafts: unsloth `mtp-...-Q8_0` sidecar, bartowski `mtp-...-Q4_0`.
-- Settings: standard Flash Next, except where noted. The 8K and conversion rows used Q8_0 KV (before the F16-only rule); all fit and MTP rows use F16 KV.
-- Workload: llama-bench PP2048/TG128 at depth 8192 (r3, or 2 alternating rounds of r2 for the A/B); llama-cli rows are the standard `flake.nix` workload, one run each.
-
-Expert weights per quant (GGUF headers): UD-Q3_K_XL gate/up IQ3_XXS 76% / IQ4_XS 17% / IQ2_S 7%, down IQ4_NL 51% / Q5_0 48%; UD-IQ4_XS gate/up IQ3_XXS 52% / IQ4_XS 44%, down Q5_0 74% / IQ4_NL 24%. Before this change Q5_0 and IQ4_XS ran on the stock kernels.
-
-| Build | Mode | PP t/s | TG t/s | Change | Accept | Output |
-| --- | --- | ---: | ---: | ---: | ---: | --- |
-| S2 | 27B Q8_0 plain @8K | 617.7 | 36.8 | reference | - | - |
-| S2 | UD-IQ3_XXS plain @8K | 524.7 | 38.4 | - | - | - |
-| S2 | UD-Q3_K_XL plain @8K | 509.0 | 39.7 | - | - | - |
-| S2 | UD-IQ4_XS `-ncmoe 2` @8K | 426.1 | 30.5 | - | - | - |
-| conv off | UD-Q3_K_XL @8K | 470.4 (one outlier) | 39.23 | - | - | PPL 1.9170 |
-| conv on | UD-Q3_K_XL @8K | 541.0 | 40.12 | +2.3% TG | - | PPL 1.9150 |
-| conv on + Q8_0 table | UD-Q3_K_XL @8K | 533.1 | 40.54 | +1% TG | - | PPL 1.9108 |
-| conv off | UD-IQ4_XS `-ncmoe 3` @8K | 398.4 | 29.56 | - | - | PPL 1.9236 |
-| conv on | UD-IQ4_XS `-ncmoe 3` @8K | 434.4 | 30.58 | +9% PP, +3.5% TG | - | PPL 1.9222 |
-| native Q5_0 | UD-Q3_K_XL + Q8_0 table, plain, 100K, `-ub 256` | 409.1 | 42.1 | - | - | - |
-| native Q5_0 | same, 64K | 416.4 | 43.8 | - | - | - |
-| native Q5_0 | same, 32K | 417.0 | 43.9 | - | - | - |
-| native Q5_0 | same, 32K, `-ub 512` | 472.6 | 41.2 | - | - | - |
-| native Q5_0 | MTP2, Q4_0 draft on ROCm1, experts on CPU, 64K, `-ts 0.505,0.495` | 382.9 | 34.9 | slower than plain | - | - |
-| native Q5_0 | **MTP2, full Q4_0 draft on ROCm1, 32K, `-ts 0.515,0.485`, `-ub 256`, `--spec-draft-n-ubatch 64`** | 390.5 | **51.5** | +17% vs plain 32K | - | - |
-
-Verdict: the conversion is landed (exact for Q5_0, IQ4_XS scale rounded to f16 at about 2^-12; same accuracy as the stock kernels against the CPU reference). UD-IQ4_XS does not fit on the GPUs: 2-3 CPU expert layers cost about 20-25% TG, mostly sync and transfer per CPU layer. MTP with the draft experts on the CPU is validated wrong (slower than plain). The best working setups are plain Q3_K_XL at 100K (42.1 TG) and MTP2 at 32K (51.5 TG, no memory margin; MTP3 and `-ub 512` ran out of memory). The PPL text is too easy to separate the quants; use the unsloth KLD table for quality.
-
-Memory per GPU at 100K, F16 KV, `-ub 256` (allocation log and sysfs peaks): weights 29.9 GiB (0.98 GiB of it mirrored: `ffn_gate_inp`, `hc_*`), main KV 1176 MiB (split by heads), QSA indexer key cache 588 MiB (one key head, so mirrored), compute 364 MiB, recurrent state 56 MiB, AllReduce staging 64 MiB; free 0.02-0.03 GiB. `llama_kv_cache` and compute buffer log lines report per-GPU sizes. A full Q4_0 draft needs about 2.3-2.5 GiB on one GPU; `-sm row` is gone upstream (`af546bb40`). The unsloth "shared" drafts lack `token_embd` and do not load in this tree. Not covered: full-length 32K prompts with MTP2, multi-slot server, acceptance rates. Raw: [flashnext-big-quants](old-ignore/2026-11-06/flashnext-big-quants/).
-
-### 2026-11-06 S2: cheaper IQ sign handling on gfx906
-
-Replace the emulated byte ops `__vcmpne4` + `__vsub4` with `sign_mask4` and `iq_apply_signs` (`(g ^ m) + (m & 0x01010101)`) in the IQ2_S mat-vec and the IQ2_S and IQ3_XXS MMQ tile loads. Kind: A/B experiment.
-
-- Source: branch `s2-iq-signs` on `02980eb3d`; baseline `bc0ce9691` (build `build-catchup-20261105-213622`).
-- Model: Flash Next UD-IQ3_XXS rev `c8b5954a88c2` (the pre-2026-11-04 upload).
-- Settings: standard Flash Next.
-- Workload: llama-bench PP2048/TG128, r5 alternating; one 96-token greedy `llama-completion` per build.
-
-| Build | Mode | PP t/s | TG t/s | Change | Accept | Output |
-| --- | --- | ---: | ---: | ---: | ---: | --- |
-| baseline | plain | 541.45 +- 1.84 | 41.17 +- 0.11 | - | - | sha `d9c2f5346efc` |
-| candidate | plain | 557.97 +- 1.09 | 43.27 +- 0.15 | +3.05% / +5.11% | - | same |
-
-Verdict: landed. The ranges do not overlap, and output is byte-identical. Correctness: an exhaustive host check of all IQ2_S grid words x 256 sign bytes and IQ3_XXS cases found 0 mismatches (grid bytes are 0x01..0x3e, so the +1 never carries), and `test-backend-ops` passed all 115 IQ2_S/IQ3_XXS `MUL_MAT`/`MUL_MAT_ID` cases on ROCm0 (n = 1..64). Not covered: the new Flash Next upload, MTP, grouped MoE. The merge build's Flash Next numbers here (541 / 41.2) are above the 2026-10-29 rows (527.6 / 39.1), but that is not a matched comparison. Raw: [s2-iq-signs](old-ignore/2026-11-06/s2-iq-signs/).
-
-### 2026-11-05 27B config sweep and 32K depth
-
-Find the best 27B speculative mode, test a larger ubatch, and check speed at a 32K prompt. Kind: A/B experiment.
-
-- Source: `bc0ce9691` (merge of official `4b77dee05`), build `build-catchup-20261105-213622`.
-- Model: 27B Q8_0 rev `4ca720788d1e`; DFlash draft `z-lab/Qwen3.8-27B-DFlash2` Q8_0 rev `2d9571f8ce46`.
-- Settings: standard 27B. 32K runs use ctx 40960. The ubatch test is llama-bench PP4096 with `-b 4096 -ub 2048,4096`.
-- Workload: speculative runs are standard, one run each. The 32K prompt is the first 116,000 bytes of `src/llama-context.cpp` at `bc0ce9691` plus a request to explain it (about 32K tokens at 3.66 bytes/token). ubatch r3.
-
-| Build | Mode | PP t/s | TG t/s | Change | Accept | Output |
-| --- | --- | ---: | ---: | ---: | ---: | --- |
-| candidate | plain, 2K | 587.4 | 36.8 | - | - | - |
-| candidate | MTP2, 2K (two runs) | 584.5 / 582.1 | 64.1 / 63.9 | - | - | `dd228997b103` both |
-| candidate | MTP3, 2K | 579.0 | 61.5 | -3.8% vs MTP2 | - | `39f8c45d0e87` |
-| candidate | DFlash5, 2K (two runs) | 574.4 / 570.6 | 67.4 / 67.7 | +5.9% vs MTP2 | - | `9f2493efdd9b` both |
-| candidate | DFlash7, 2K | 570.7 | 62.5 | -7.7% vs DFlash5 | - | same as DFlash5 |
-| candidate | plain, 32K | 541.2 | 29.4 | -20% vs 2K | - | `b94840dcade5` |
-| candidate | MTP2, 32K | 512.3 | 42.7 | -33% vs 2K | - | `c8ae52851843` |
-| candidate | DFlash5, 32K | 512.0 | 39.9 | -41% vs 2K | - | same as plain |
-| candidate | PP4096, ub 2048 / 4096 | 684.1 / 606.3 | - | -11.4% | - | - |
-
-Verdict: DFlash5 is the fastest 27B mode at a 2K prompt and MTP2 at 32K; the crossover was not measured. Deeper drafts (MTP3, DFlash7) are slower. ubatch 4096 is validated wrong for 27B PP. Plain TG loses 20% at 32K, which motivates D1. Repeats at 2K varied by 0.2-0.3 t/s TG; noise at 32K was not measured. DFlash output matches plain greedy at 32K. Not covered: Flash Next, acceptance rates (`--simple-io` prints none), the crossover depth. Raw, including generated text: [config-sweep](old-ignore/2026-11-05/config-sweep/), [depth32k](old-ignore/2026-11-05/depth32k/).
-
-### 2026-11-05 catch-up to official 4b77dee05
-
-Check that the merge keeps 27B speed and output. Kind: regression screen.
-
-- Source: `bc0ce9691` (merge of official `4b77dee05`; build made before the doc-only commits); baseline `build-ilp`, `build_commit e04bc2e38` (old master, stage A of the rebuild), run with `LD_LIBRARY_PATH=build-ilp/bin`.
-- Model: 27B Q8_0 rev `4ca720788d1e`; DFlash draft `z-lab/Qwen3.8-27B-DFlash2` Q8_0 rev `2d9571f8ce46`.
-- Settings: standard 27B. MTP2 adds `--spec-draft-backend-sampling`.
-- Workload: standard, one run each, baseline then candidate per mode.
-
-| Build | Mode | PP t/s | TG t/s | Change | Accept | Output |
-| --- | --- | ---: | ---: | ---: | ---: | --- |
-| baseline | plain, llama-bench | 697.55 | 37.75 | - | - | - |
-| candidate | plain, llama-bench | 696.88 | 37.90 | -0.1% / +0.4% | - | - |
-| baseline | MTP2 | 598.0 | 64.0 | - | - | sha `dd228997b103` |
-| candidate | MTP2 | 584.5 | 64.1 | -2.3% / +0.2% | - | same |
-| baseline | DFlash5 | 584.0 | 66.8 | - | - | sha `9f2493efdd9b` |
-| candidate | DFlash5 | 574.4 | 67.4 | -1.6% / +0.9% | - | same |
-
-Verdict: no regression; speculative output is byte-identical between builds. The CLI prompt rate varies more than llama-bench PP (see below), so the -2% is not a signal. TP smoke checks passed at n=1 and n=2048; a 32-token `llama-completion` generation was coherent. Not covered: Flash Next (MoE PP after the MMQ tile layout change #31047), grouped MoE, multi-slot server. Raw, including generated text: [catchup-4b77dee05](old-ignore/2026-11-05/catchup-4b77dee05/).
-
-### 2026-10-29 A1 config sweep (TG)
-
-TG128 on the master build, each candidate next to a 1/1 baseline. ROCm0 is taken to be the MI60 (PCI 03:00, the lower bus; HIP orders devices by bus). Most runs are one repeat; the 27B 0.52/0.48 retest is two r2 runs. The sweep script passed `-ts` and `-t` twice, so llama-bench ran both values; the numbers are the candidate rows from the JSON. [Scripts and JSON](old-ignore/2026-10-29/a1-sweep/).
-
-| Setting | 27B Q8_0 t/s (1/1 in same run) | Flash Next t/s (1/1 in same run) |
+| IK1 (new) | Make the decode attention kernel `flash_attn_ext_vec` cheaper at long context (for example compute the bias inside it, or skip masked work) | 93% of the generation growth with context is this kernel (B, 2026-11-22 trace pair); 32.8 t/s at 4K context vs 37.4 at 16 tokens, both under trace; 36.4 t/s at 4K untraced | up to the traced gap, about 4.6 t/s at 4K context (37.4 vs 32.8) | per-call time of the kernel against context length in a trace; check graph reuse after any change | a fix is in progress; see [handoff.md](handoff.md) |
+| IK2 (new) | Take views of the mix output and loop messages without `ggml_cont` (lay RES_MIX output out as [n_embd, n_tokens, n_q]) | 5 launches per layer pass (playbook, count from a 2026-11-21 trace, B) | 2.5% TG (5 launches x 0.1 ms per token at 2.2 us) | build it behind a kill switch, A B B A | none |
+| IK3 (new) | Fold input norms into the producer; fuse MoE glue (router weights, activation, combine) | 10 launches per layer pass | 5% TG | same | none |
+| IK4 (new) | Loop controllers Q/K/V as two batched kernels (a block per gate value, then a block per output slice) | 8 launches per looped pass; R-IN8 shows the one-block form lost | 4% TG | microbench the two-kernel form first | none |
+| IK5 (new) | Short-conv reads without the concat; state write as one in-place kernel | 4-6 launches per pass | 2.5% TG | same | none |
+| IK6 (new) | One kernel for clip Q, clip K, clip R, norm V and the tau scale (packed output) | 4 launches per pass | 2% TG | same | none |
+| IK7 (new) | One mat-vec launch over the weights that share an input (`wq`, `attn_rel`, `attn_sink_proj`, `wqkv_gate`) | 4 launches per pass; hardest | 2.5% TG | microbench of one multi-matrix launch against 4 calls, bit-exact check | none |
+| IK8 (new) | Server TG is below the bench on the same file (NVFP4: 37.1 vs 45.8 t/s) | measured gap (B); the cause is unknown; the context slowdown (IK1) may explain part (`-c 16384`) | up to 8.7 t/s (the gap) | same file with server vs bench at equal context; then `--reasoning off` and the sampler | none |
+| IK9 (new) | Keep raw UE4M3 NVFP4 scale bytes and decode in the kernel | NVFP4 repack costs +1,305 MiB VRAM (B) | -1.3 GB VRAM; no speed claim | build and compare PP/TG and VRAM | none |
+| IK10 (new) | Two GPUs: one Inkling instance per GPU for 2-4 slots (NVFP4 file needs about 19 GB of 32) | user workload: one slot about 70% of the time, 2-4 slots about 30%; `-sm tensor` is not implemented for `inkling2_loop` | not estimated | `llama-batched-bench` on two instances | tensor-split rules for the new tensor types do not exist |
+| IK11 (new) | Find why a pure batch-size change moves this model by KLD 0.005 | measured (B); the guess is near-tie flips in expert routing | none (understanding) | log the top-8 expert sets at two ubatch sizes, or fix the routing | none |
+
+### Flash Next
+
+What limits it: 83-88% GPU-busy (B, one trace), 2,811 launches per token per GPU, so launch cost and some idle host time both matter (the launch floor is about 31% of a 19.8 ms token, C, derived). The biggest kernel groups are experts 21%, AllReduce kernel 11% and hyper-connection mix about 11 us per call (B, one trace). Items TB3 and L2 (small-kernel chains) apply here too; they are in the 27B table.
+
+| Id | Idea | Basis | Est. gain (C) | Cheapest test | Blockers |
+| --- | --- | --- | --- | --- | --- |
+| TB2, F2b, playbook FN item 1 | Wide-block rewrite of `dsv4_hc_mix_down` / `_up` (11.6 and 10.7 us per call, one pass, warp reductions); fuse `dsv4_hc_post` into the next `dsv4_hc_mix_prep`; fold down + up into one launch (last-block reduction) | 197 calls each at 11 us (B, 2026-11-21 trace); HC row 3.88 ms (14%) in the 2026-11-10 budget (B, profiled); the res_mix rewrite gave +9.5% on Inkling (A) by analogy; F2b: T=4 call 47 us vs 27 us at T=1 | rewrite part: about 1.3 ms per GPU, about 6% TG (by analogy). Launch part: 2 launches x 96 sites x 2.2 us = 0.42 ms (was 1.0-1.5 ms profiled at the old 4-5 us assumption, which included tails); post + prep removes 96 launches per token: est. 0.21 ms (was about 0.4 ms, 2%). F2b weight-stationary T>1 kernel: about 1.6 ms per MTP3 step (~3%) | one `-o DSV4_HC_MIX` backend test plus A B B A on the rewrite; sum order must stay, or KLD at `-ub 8` | none |
+| Generic `mul_mat_vec_q` calls (playbook FN item 2) | Add the missing quant type as a repack layout variant (53 + 43 calls at about 34 us) | 2026-11-21 trace (B) | 4-8% TG | find which tensors and types fall to the generic kernel (names in the trace) | none |
+| P1, T1, playbook q8_1 and elementwise items | Remove intermediate `scale_f32` and `quantize_q8_1` passes: q8_1 cache keyed on the view root, swiglu writing q8_1 directly, one l2 norm over q and k; write q8_1 in the producer; fuse elementwise chains (about 400 launches per GPU per token) | about 480 `quantize_q8_1` (2.3 ms) and 303 `scale_f32` (1.8 ms) per token on ROCm1, profiled, counts predate F2 (B); T1 WIP: 3282 -> 3115 launches (-5.2%) but wrong output from token 1 (unfinished); 299 q8_1 launches per GPU per token in the 2026-11-21 trace | T1's 167 fewer launches: est. 0.37 ms (was 0.7-0.8 ms at the old 4-5 us assumption). `scale_f32` 303 x 2.2 us = 0.67 ms (was 1.8 ms profiled). The old range for P1 was 1.0-1.5 ms profiled; q8_1 in producer about 3% TG and elementwise chains about 4% (playbook, at 2.2 us). Sum of these overlaps TB2 and is not added | recount `quantize_q8_1` and `scale_f32` per token in a new trace (counts are from before F2); then bisect T1 with `GGML_CUDA_FEWER_LAUNCHES` masks on its branch | T1 branch gives wrong output (suspect: the l2 merge on strided q/k) |
+| TB1 (route 2) | Fused single-block radix kernel for the QSA top-k | QSA indexer 2.5 ms (3.0 at 32K) in the 2026-11-10 budget (B, profiled); 12 radix launches cost 70-90 us per call | not estimated | microbench against the 12-launch version | the bitonic route lost (see did not work) |
+| FN-A | Weight-stationary grouped expert GEMM for PP (per-expert token lists, 8-16 q8_1 tokens per chunk in LDS, decode each weight once) | stock `mul_mat_q` gate/up is 22-23% of PP (94 calls per ubatch, about 2 ms each) in the 2026-11-10 PP budget (B); about 78 GB/s | +12-14% PP corrected (was +20% at ub 512) | go/no-go microbench of one layer against `mul_mat_q`; KLD check | L effort |
+| TB4 | Fold the MoE weighted reduce and shared-expert add into the routed down mat-vec | MoE reduce + combine 1.03 ms on ROCm1 vs 0.78 on ROCm0 (B, profiled) | 0.4-0.7 ms profiled (launch count not stated, not recomputed) | per-kernel times of `moe_weighted_reduction_f32` and `k_bin_bcast` in the FFN segment | none |
+| TB5 | Build the QSA k-pool inputs and n-gram ids on the device, or reuse them across tokens | ROCm0's own token-start gap is 0.90 ms @8K and 1.22 @32K vs 0.25 / 0.32 on 27B (B, profiled); Flash Next is 83-88% busy, so some idle share exists | up to about 0.65 ms @8K (estimate) | host timestamps around graph compute (this is the proper N2 test) | `perf` blocked |
+| W64 | True wave64 small kernels (one row per 64 lanes; `WARP_SIZE` is a logical 32, the gfx906 wave is 64) | candidate sites `norm.cu`, `binbcast.cu:406`, `softmax.cu:377`, `topk-moe.cu:389`; the 4-5 us glue kernels dominate | 0.3-1.5 ms per token (estimate; likely 0.1-0.5 us per call, unknown) | list kernels with workgroup size 32 in one trace (`Workgroup_Size_X`); microbench the top one | a 64-lane tree changes sum order (KLD) |
+| P2 | Speed up tiny float projections (find the shapes, combine projections that share an input) | 344 `mul_mat_vec_f` calls at 6.9 us (2.4 ms) in the 2026-11-21 trace (B); 9.84 us on ROCm1 vs 6.97 on ROCm0 (2026-11-10) | up to about 2 ms (old count predates F2); likely below 1 ms | recount in a new trace | none |
+| S1 | Stage the IQ codebook grid and q8_1 activations in LDS in the grouped expert gate/up kernel | Strata found a similar kernel compute-bound at 110-130 GB/s; ours reach about 150 GB/s useful | about 0.5 ms (a fraction of the 2.58 ms routed experts) | microbench | Strata numbers are not comparable |
+| S4 | One-wavefront-per-row small mat-vec with a 64-lane butterfly, 1-8 columns | candidate for P2 | unknown (D) | check our block shape first | none |
+| M2 | Build the repacked MoE tile list from upstream `tile_spec` instead of `repack_tile_off<<<1, 1>>>` | `repack_tile_off` 44 calls per ubatch at 65-67 us = 5.7 ms per 1K, 0.34% of PP (B) | upper bound +0.3% PP | bit-for-bit output check | none |
+| P1a | Fold the constant 1/hc scale into the HC down mat-vec | r5 TG -0.5%, but the fusion did not fire (10145 `scale_f32` on both builds) (B) | 0.4 ms for this subset, 1.2 ms for all 303 scales (profiled, at about 4.2 us each) | get a lower `scale_f32` count in a trace first | none |
+| A2 | Defaults `LLAMA_SHEXP_SPLIT=1` and `GGML_SCHED_SHARE_VIEW_INPUTS=1` | off was 0.6-1.1 t/s slower, inside Flash Next noise (B, one repeat); PP not run | not estimated | PP2048 r5 alternating; drop a knob that shows no difference | none |
+| A1-FN | `-ts` for Flash Next TG, and for PP on both models | Flash Next TG one repeat: 0.52/0.48 37.80 vs 37.46, 0.48/0.52 36.64 vs 40.08 (B, inside noise); Oct 12: 56/44 gave +3% 27B PP for -5% TG | expect at most about 0.4 ms from a 4% shift (C) | Flash Next TG r5 alternating; PP2048 r3 at 56/44 | none |
+| L-T16 | `-t 16` on Flash Next | 39.44 vs 37.64, one sample in the same run (B) | not estimated | r5 alternating against `-t 8` | none |
+| L-GMR | Grouped-MoE gain on the current tree | not re-run since Oct 25 (the Landed row has the older numbers) | not estimated | MTP2 with `GGML_CUDA_FLASHNEXT_MOE=0/1`, r5 alternating, same acceptance | none |
+| A5 | Expert parallelism: whole experts per GPU | routed experts 2.58 ms (B, budget); busier GPU runs about 6.2 whole experts against 5 equivalent today; a 640-row expert must run more than 1.25x faster than two halves | 1-2 ms, corrected to 0-0.5 ms for TG (PP is the better case) | one-GPU microbench: 10 experts x 320 rows against 6-7 experts x 640 rows | L effort; no upstream prior art found |
+| D2, E1 | Fit: keep one copy of the QSA indexer key cache and router (D2, saves about 0.8 GiB at 100K); per-expert hot/cold placement across GPU and CPU (E1, about 1 ms per token per CPU layer sync) | memory arithmetic (C); upstream's MoE expert cache refuses `-sm tensor` | D2 not enough for 64K or 100K MTP on Q3_K_XL; E1 lets IQ4_XS fit | E1: UD-IQ4_XS `-sm layer -ncmoe 3 --moe-cache-mib N` against `-sm tensor -ncmoe 3` (30.6 TG) | needs tensor-split support in `llama-moe-cache` |
+
+### 27B Q8_0
+
+What limits it: 98% GPU-busy at 96-99% (B, one trace). 69% of traced kernel time is weight mat-vec at about 90% of the roofline (B), AllReduce kernel 9%, 1,645 launches per token per GPU (launch floor about 13% of the 26.9 ms token, C). The reachable kernel gain is small.
+
+| Id | Idea | Basis | Est. gain (C) | Cheapest test | Blockers |
+| --- | --- | --- | --- | --- | --- |
+| K2 (both models) | `HIP_FORCE_DEV_KERNARG=1` (kernel arguments in VRAM) | ROCm1 runs every small kernel about 0.6 us longer while its mat-vec is 1.1% slower; bare launch 2.0 us on the MI60 vs 2.6 us on the MI50 (B, microbench); the cause may be PCIe latency on chipset lanes, not tested | 27B 0-1.1 ms, Flash Next 0-2.0 ms (profiled, low confidence) | TG r3 (27B) and r5 (Flash Next) alternating plus one trace each; go if ROCm1's excess busy time (1.09 / 2.02 ms) shrinks | none; env only |
+| Playbook 27B item 1 (`add_rms_norm_mul_f32<1024>`) | Rewrite the norm epilogue with a wide block and warp reductions (11.3 us per call against 4.5 us for a plain row norm) | 264 calls per token (B, 2026-11-21 trace); Q1 tried an unrolled epilogue and measured 12.9 us; three more micro-variants gave 10.7 to 14.8 us (route 27B-ARN in [What did not work](#what-did-not-work)) | about 0.9 ms per token per GPU, about 3% TG | `test-backend-ops` plus A B B A | none |
+| TB3, L2, playbook 27B item 2 | Fused GDN decode step: conv, l2 norms, gates, gated delta net, gated norm in 2-3 launches instead of about 13 per layer; one launch for mat-vecs that share an input (GDN qkv, z, alpha, beta; attention q/k/v) | about 500 recurrent-chain launches per GPU per token; recurrent row 3.23 ms (27B@0) and 2.32 ms (FN@8K) in the profiled budget (B); 176 launches for L2 | TB3: about 10 launches per layer saved: 27B 48 layers x 10 x 2.2 us = 1.06 ms (was about 1.5 ms at the old assumption), Flash Next 36 layers x 10 x 2.2 us = 0.79 ms (was about 1.2 ms). Playbook: about 1.1 ms, about 4% for 500 launches. L2: 176 launches x 2.2 us = 0.39 ms (was 0.8-1.2 ms, corrected 0.4-0.7 ms at the old assumption) | dump the recurrent-segment kernel names and mean us of one layer from a 27B trace; go if at least 8 are under 6 us; microbench 4 calls vs one multi-matrix launch (bit-exact) | check upstream for a fused GDN decode step first |
+| Q3 (route 2) | Contiguous per-block reads with a per-row LDS re-reduce in the Q8_0 mat-vec (bit-exact) | the kernel is at 89-90% of the best stream (B) | about 1.9 ms per token is the most left (C) | `mvbench.hip` variant | none |
+| A6, Q2, N3 | Two-half ubatch pipelining of the prefill AllReduce so one half's reduce overlaps the other's GEMM, after a re-profile of 27B PP (A6 re-profile is done) | A6 re-profile 2026-11-10: repacked GEMM 76% of the critical path (gate/up 33.5%, down 18.9%), chunked GDN 7.9%, AllReduce exposed 5.4%, ROCm1 GEMM 21% slower than ROCm0 (B) | N3: +3-5% PP corrected (was +8-12%, and "3-5% at best") | prototype with pooled memory for two in-flight halves, bit-exact | M effort |
+| G1, D1, L1 | Long-context attention: group all 6 Q heads per KV head in `TILE` (G1); a small-batch vec path with several query columns per KV pass (D1); skip K/V work in `fattn-vec` for masked wavefronts (L1) | 27B: llama-bench depth 0 -> 32K costs 3.17 ms per token (26.70 -> 29.87, B); flash attention 3.34 ms at 32K, 209 us per layer per GPU against about 86 us for one F16 KV read (B, profiled); vec path at short context: `TILE` costs 28 us per call on 27B and 20-27 us on Gemma 4; L1 is a third-party +13% decode at 85K on NVIDIA, not reproduced here | G1: about 1-1.5 ms at 32K (corrected from up to about 3 ms); D1: about 0.3 ms (27B) and 1.2 ms (Gemma 4) at short context; L1: long context | rocprofv3 at 32K; go if attention per layer is at least 2x a single KV read; count the masked fraction for L1; DFlash5 verify still to profile | probably not bit-exact (KLD); source line anchors in the old rows were stale |
+
+### Both models and infrastructure
+
+What limits it: the AllReduce exchange (1.01-1.62 ms critical-path per token, B, profiled, 2026-11-10) and ROCm1 small kernels running about 0.6 us longer than ROCm0 (B). The values for these quantities differ by source, see [Numbers that disagree](#numbers-that-disagree).
+
+| Id | Idea | Basis | Est. gain (C) | Cheapest test | Blockers |
+| --- | --- | --- | --- | --- | --- |
+| P3 | Find the late rank before each AllReduce and speed up its preceding work | ROCm0 waits in AR 5.19 vs 1.03 ms per token on Flash Next and 4.1 vs 1.7 on 27B (Oct 12); 2026-11-10: about half of the profiled wait is profiler cost; real lag about 1.1 ms per token on 27B (each small kernel about 0.6 us longer on ROCm1); ROCm1 busy minus ROCm0 busy: 27B@0 1.09 ms, FN@8K 2.02, FN@32K 1.95, G4@0 1.36 (B, profiled). Lanes on the dispatcher thread and uneven `-ts` were tried: no TG gain | about 1.1 ms on 27B, reached through fewer small kernels, K2 and A4 | see K2 | none |
+| A4 | Move ROCm1 to CPU-attached PCIe lanes, then test peer AllReduce and RCCL | AR, post-AR gaps and peer wait are 4-7 of 27 ms per token on 27B (old row); 2026-11-10: the reachable part is the AR exchange (27B 1.62 ms, FN 1.01 ms critical) plus ROCm1's small-kernel lag if it comes from the chipset link (K2 tells) | about 2-2.5 ms on 27B, 2-3 ms on Flash Next, not 4-7 ms (C; hardware change not tested) | run K2 first | hardware change; the claim that RCCL does not work here rests on the topology assertion (D), RCCL was never measured in these docs |
+| AR-LL | NCCL-LL style AllReduce packets (8 B data plus an 8 B sequence word) so the peer polls the data: one PCIe trip instead of 2-3; bit-exact | `ggml_cuda_ar_kernel` 26.9 us for 5 KB on Flash Next (92 per GPU per token, 2.5 ms), 16.9 us on 27B (129 per token, 2.2 ms); critical exchange 1.62 ms (27B@0), 1.01 ms (FN@8K), 1.90 ms (G4@0) (B, profiled) | corrected to at most 0.6 ms (27B) and 0.5 ms (Flash Next); the earlier -1 ms and -0.7 ms are the whole exchange | time a variant of `vr-test-gfx906-tp` with the two system fences per block relaxed (`allreduce.cu` `__threadfence_system` lines; timing test); build LL if it reaches below about 8 us per call | none |
+| Program kernel | One generic kernel that runs a short list of elementwise steps (add, mul, scale, tanh, sigmoid, clamp) over a small tensor in one launch; the backend fuses any run of small elementwise nodes for every model | none measured (D) | not estimated | prototype on one chain | needs use counts so values read outside the run are kept |
+| Thread per stream | Host thread per stream for independent branches of a layer | 1.9x launch throughput with a host thread per stream, 1.45x from one host thread (B, microbench) | not estimated | microbench on a real two-branch layer | each join costs an event wait |
+| TB6 | Gemma 4: find why the AllReduce after the FFN takes 19.4 us against 11.5 us after attention for the same vector | 2026-11-10 budget G4@0: AR exchange 1.16 vs 0.69 ms; attention glue 1.67 ms (B) | about 0.5 ms (AR) plus part of the attention glue | explain from per-AR trace times | secondary model |
+| L-GCN | Upstream GCN Q8_0 MMQ rows 256 -> 512 threads (discussion 23881) | third-party: +19% Q8_0 pp512, -6.9% Q4_K (C); helps plain upstream, not the repacked path | none for this fork's repacked path | - | not reproduced |
+| Ruled out by analysis (not tested) | Tree verify (48 recurrent GDN layers need forked state per branch); mirror Flash Next attention to drop one AllReduce per layer (+1.1 GB per GPU, no memory left at 100K); run replicated glue on ROCm0 alone (each glue block would need its own exchange of 10-20 us, more than ROCm1's few-us penalty) | analysis, no test (C / D) | - | - | not tested |
+
+### Speculative decoding
+
+What limits it: the verify step and the host side of each step. The split numbers in [TOKEN-BUDGET.md](TOKEN-BUDGET.md) are estimates (C); no speculative trace exists.
+
+| Id | Idea | Basis | Est. gain (C) | Cheapest test | Blockers |
+| --- | --- | --- | --- | --- | --- |
+| SP3 | Measure the verify cost curve for 1-8 columns, then re-tune draft depth | server per-position acceptance (DFlash5 0.775/0.624/0.509/0.425/0.353, MTP2 0.843/0.690) with about 1.7 ms per extra verify column (Oct 12) predicts DFlash7 and MTP3 should win; the 2026-11-05 llama-cli runs measured DFlash7 -7.7% and MTP3 -3.8% (B) | 0-8% | `llama-bench -p 1,2,...,8 -n 0 -r 5` on both models; no code | none |
+| SP1, SP1a | GPU greedy / top-k sampling under `-sm tensor`: each lane takes top-k over its vocab half and the 2k candidates merge (exact for greedy) | `llama_context::set_sampler` refuses backend sampling under tensor split, so 27B falls back to the CPU sampler: each draft and target row reads back about 1 MB of logits and samples 248,320 entries on the host; the SP1a attempt aborted at load (see did not work); the host part of a 27B MTP2 step is about 5 ms (derived, C) | 1.5-3 ms per MTP2 step (4-7%), about 2 ms per DFlash step, about 0.5 ms per token plain server (estimate) | host timestamps around the sampler during `spec_accept.sh` | `perf record -g` (the old test plan) is blocked; the `GGML_META_TOPK_BCAST_LOGITS` switch named in the old row is not in the code; line anchors moved |
+| SP2 | Reduced-vocabulary draft head (FR-Spec style), reusing upstream EAGLE3 `d2t` mapping | the full 248,320-row head is about 75% of each 27B MTP draft decode's bytes; LM head 0.88 ms (27B TP) and 0.52 ms (FN TP) per pass (B, budget) | 27B MTP2 -1.5 ms per step (~4%), Flash Next MTP3 -2.5 ms (~5%), DFlash -1.5 ms (~3%) (estimate) | CPU side: share of tokens in the top 32k/64k ids over the `spec_accept.sh` replies plus a code/prose corpus; go if at least 99% | none |
+| SP4 | Stop charging the deferred DFlash draft prompt replay to generation | DFlash5 step is 48.1-49.0 ms on 22-29-token prompts but 60.3-66.9 ms on about 1,750-token prompts (B) | +15-25% TG on long-prompt requests (estimate) | `LLAMA_DFLASH_DEFER=0` against default, short prompts | the `LLAMA_DFLASH_DEFER` knob was removed 2026-11-21; the test needs it re-added |
+| MU1 | Speculation that scales with busy slots: (a) lower the draft length when several slots verify at once, (b) let the narrow repacked mat-vec take up to 16 columns (`MMQ_RP_Q8_MMV_MAX_TOKENS 8`) | 4 users at 16K: plain 4-way decode 81 t/s, server MTP2 60.9 t/s; 2026-11-11: no draft 43.9 vs MTP2 41.2 aggregate; different harnesses, not a matched A/B (B) | up to the 81 vs 61 gap (about +30% aggregate at 4 busy users, estimate) | SP3 extended to 16 columns, plus a matched server A/B of 4 users with MTP2 against no draft | none |
+| L-DF10 | Find the about 10 ms host gap per DFlash step (inject/generate gap, sampling and accept, readbacks) | Oct 12 profile; not the draft rebuild (N1) | DFlash5 about 70 t/s if closed (Oct 12 estimate) | trace first | none |
+| U3 | Load the unsloth shared MTP heads (borrow the target embedding and head) to save memory for Flash Next MTP | saves about 1.8 GiB; "unverified" under `-sm tensor` with the ROCm1 sidecar (C) | memory only | load test | none |
+
+## Retired claims
+
+Each row: what the old text claimed, what is known now, and where. Grades are in "now".
+
+| Claimed | Now | Source |
 | --- | --- | --- |
-| `-ts 0.52/0.48` | 36.20 (37.42); retest 36.06, 36.16 (37.13, 37.01) | 37.80 (37.46) |
-| `-ts 0.48/0.52` | 35.52 (37.39) | 36.64 (40.08) |
-| `-ts 0.56/0.44` | 34.92 (37.40) | not run |
-| `-t 16` | 36.61 (36.93) | 39.44 (37.64), one sample |
-| `-t 8` | 36.86 (37.30) | default |
-| `GGML_CUDA_AR_SLABS=0` | 37.39 (baselines 37.16-37.45) | 36.79 (37.52-37.58) |
-| `GGML_SCHED_SHARE_VIEW_INPUTS=0` | 37.11 (37.16-37.37) | 36.12 (37.20-37.27) |
-| `GGML_META_PARALLEL_DISPATCH=0` | 35.83 (37.37) | 35.82 (37.27-37.99) |
-| `LLAMA_SHEXP_SPLIT=0` | n/a | 36.94 (37.52) |
+| The limit is a per-token host gap before each token graph (N2, TB5 in part, "No dispatch on either GPU: about 4.3 ms", launch ramps, "reduce host launch gaps") | steady-state generation is 98% GPU-busy with kernels back to back on Inkling, 96-99% on 27B (B, one trace each); the profiled gap was largely profiler cost. Flash Next is 83-88% busy, so an idle share exists and is unexplained (see TB5) | [What we know](#what-we-know) |
+| Every removed launch is worth the 4-5 us floor (ceilings of P1, T1, TB2, TB3, L2, W64) | the app cost is about 2.2 us; 4.2 us is the profiler floor; ceilings built on 4-5 us are about 2x high and are recomputed in Hypotheses (B) | [What we know](#what-we-know) |
+| A4 (move ROCm1 to CPU lanes) is the top lever, 4-7 of 27 ms | an untested hardware change; the 2026-11-10 correction was 2-2.5 ms on 27B (C) | A4 in [Hypotheses](#both-models-and-infrastructure) |
+| "Official llama.cpp matches the fork on Flash Next plain TG because the fork speeds up byte-heavy paths" | an explanation without a test (D); Flash Next plain TG rose from 39.1 to 50.18 (B/A, rows F2, S2, B1, P4), all with fork kernels | [What worked](#what-worked) |
+| Against official llama.cpp: +53% 27B PP, +12% 27B TG, +74% Flash Next PP, no Flash Next TG gain (2026-10-29, `36a0e2ffc`) | single stage runs on an old base (B); not re-measured; the Flash Next TG part is superseded | [rebuild record][rec-1029-rb] |
+| The MI60 is 10-20% faster and has the better host link | no source (D); ROCm1 GEMM is 21% slower in PP but mat-vec 1.1% slower in TG; the 2.0 us vs 2.6 us bare launch cost differs by 0.6 us (B) | [HARDWARE-GUIDE.md](HARDWARE-GUIDE.md), [TOKEN-BUDGET.md](TOKEN-BUDGET.md) |
+| Uneven `-ts` can give 2-3% | on 27B every uneven split measured slower (A1-27B, A); Oct 12: 56/44 gave +3% PP for -5% TG (B) | [What did not work](#what-did-not-work) |
+| FP8/FP4 lose precision, so we skip them; they lose their speed point | NVFP4 is the Inkling checkpoint's own expert format; repacked it runs PP 836.3 against IQ4_NL 878.6 on the same GPU (A/B) | [What worked](#what-worked) |
+| Removed knobs: `GGML_SCHED_INPUT_STAGING_F32_MAX`, `GGML_RP_MMV_ROWS`, `LLAMA_DFLASH_DEFER`, `GGML_META_TOPK_BCAST_LOGITS`, `GGML_CUDA_PEER_AR`, `GGML_CUDA_TP_OVERLAP`; about 30 sweep knobs archived 2026-11-21 | no longer in the code (0 hits); `GGML_CUDA_FEWER_LAUNCHES` exists on the unfinished T1 branch | [knobs archive](old-ignore/2026-11-21/knobs/), [IMPROVEMENTS.md](IMPROVEMENTS.md) |
+| Peer-write AllReduce is an opt-in option | archived 2026-11-21; no live code path | [archive](old-ignore/2026-11-21/peer-ar/README.md) |
+| Inkling generation slows with context because small ubatches use the dense bias chain (route R-IN9) | the bias chain kernels do not grow; 93% of the growth is `flash_attn_ext_vec` (B, one trace pair, 2026-11-22) | [What we know](#what-we-know) |
+| "About 41" t/s for Inkling 2 Mini short-context generation in `llama-batched-bench` | not a measurement; measured: 36.4 t/s at 4K context (untraced) and, under trace, 32.8 t/s at 4K against 37.4 t/s at 16 tokens (B) | [What we know](#what-we-know) |
+| "GPU 99% busy is not shown by rocprof; 25% busy" (a retraction in the 2026-11-21 handoff) | the retraction was wrong: the 25% figure included model load; steady-state is 98% busy (B) | [What we know](#what-we-know) |
+| "About 7,100 kernels, each tiny kernel 3.8 us" | the 3.8 us is profiler wall time per launch, not kernel duration; the app cost is about 2.2 us | [What we know](#what-we-know) |
+| 27B uses "about 75% of the bandwidth roof"; "a software 40-44 TG is a plausible target"; later 77%, 40-42, 90% | different denominators, not reconciled; targets are estimates (C) | [Numbers that disagree](#numbers-that-disagree) |
+| "A measured 3-5 ms cut would give about 41-45 TG" and "a 3-5 ms cut gives about 50-56 TG" (Flash Next) | estimates (C), not measured; Flash Next already measures 50.18 | [What worked](#what-worked) |
+| 2026-10-29 Flash Next attribution list (float mat-vec 3.1 ms, AllReduce 5.3 ms, ...) | replaced by the 2026-11-10 budget; the profile was 21% slower than unprofiled | [TOKEN-BUDGET.md](TOKEN-BUDGET.md), [profile][rec-1029-prof] |
+| "Routed experts are 19% of active bytes; free expert weights would save under 1 ms" | the byte share is a measured tally (B, old upload); the time claim is an estimate (C) | [records][rec-1029-x] |
+| "Speculation gains less on Flash Next because each verify token picks its own experts" | the gain numbers are B (MTP2 +33% vs +68%); the mechanism is an assertion (D) | [What worked](#what-worked) |
+| "2-3 CPU expert layers cost about 20-25% TG, mostly sync and transfer" | quant and placement changed together in that run (C); mechanism not isolated | [big quants][rec-1106-q] |
+| "Plain TG loses 20% at 32K, +6.8 ms per token, mostly attention" | not reproduced: llama-bench gives 3.17 ms (B); see [Numbers that disagree](#numbers-that-disagree) | [27B sweep][rec-1105-s] |
+| "Judged default-on safe" (F2/P4 review) | a review opinion (D); the Q8-reference KLD was not measured and P4 dispatch lacks guards | [F2/P4][rec-1106-f2] |
+| "DFlash5 is the fastest 27B mode at a 2K prompt" | one or two llama-cli runs (B); the same record says llama-cli TG swings 10-18% with the greedy text | [27B sweep][rec-1105-s] |
+| "27B TG varies about +-0.3 t/s, so r3 alternating is enough" | benchmarks drift 15-30% when the GPUs are hot; use A B B A below 60C (B) | [How to test](#test-rules) |
+| "Profiled TG was 21-45% slower" | two ranges exist, 21-45% and 7-24%; not reconciled | [Profiler caveats](#profiler-caveats) |
+| "Byte-identical output" or "text identical" as evidence of no quality change; PPL 2.8307 vs 2.8305 as parity | a smoke test; on Inkling a batch-size change alone moves KLD about 0.005 (B) | [Quality checks](#quality-checks) |
+| K2: "looks like per-dispatch PCIe latency on chipset lanes rather than the power cap" | untested (C/D); the 0.6 us bare launch difference between MI50 and MI60 is consistent with it, not proof | K2 in [Hypotheses](#27b-q8_0) |
+| The old verdict wording "validated" plus "wrong" (F1, Q1, N3, draft device, 2D memcpy, ub 4096) in 2026-11-06 verdicts | the phrase meant "one implementation lost"; F1 was a premise check, N3 was not built, Q1 was a profile; see the status words | [What did not work](#what-did-not-work) |
+| S3 (split HC down projection along K) about 3% | superseded by F2 (`dsv4_hc_mix_down` is a fused op now); probably obsolete | [records][rec-1106-f2] |
+| S5 (router top-k in one wavefront) | merged into B1 | B1 in [What worked](#what-worked) |
+| A6 (re-profile 27B PP) listed as open | done 2026-11-10; folded into the A6, Q2, N3 row | [Hypotheses](#27b-q8_0) |
+| L-MMQC: `mmq-config-gfx906.cuh` is never selected | the file no longer exists (removed in the 2026-10-29 rebuild) | [IMPROVEMENTS.md](IMPROVEMENTS.md) |
+| Open-section priority list (K2, TB1, TB5, B1, TB2, TB3, SP1, P1) of 2026-11-10 | repeated ledger rows with other numbers; TB1 is a tried item and B1 landed; replaced by the tables above | - |
+| Oct 25 rows (grouped MoE 47.65 -> 50.45, 27B MTP3 60.0) | one run each, old trees (B); superseded by 2026-11-06 and later rows | [records][rec-1029-x] |
+| Handoff target "TG from 28 ms toward 10 ms per token on one GPU" | reached about 21 ms (47.7 t/s) on Inkling IQ4_NL; the plan was replaced | [late record][rec-1121-late] |
+| Rely on upstream for Inkling 2; do not carry Inkling pins; unsloth banded op "should run on HIP" | the fork carries the #386 port, fused ops and the NVFP4 repack; scalar banded kernels halve PP | [late record][rec-1121-late] |
+| "Cut 2,000-3,000 lines without losing speed" (merge plan) | actual core delta +16426/-995 became +15276/-1039 | [catch-up record][rec-1121-u] |
+| Larger quants and `-ctk q8_0` plans (temp-128k plan): "Q3_K_XL at 128K with Q8_0 KV leaves about 4 GiB" | measured 2026-11-06: Q3_K_XL with F16 KV at 100K leaves 0.02-0.03 GiB; quantized KV is not used (user rule) | [big quants][rec-1106-q] |
+| "Larger quant is a quality experiment, not a speed improvement" | Q3_K_XL 39.7 vs IQ3_XXS 38.4 @8K (B) | [big quants][rec-1106-q] |
+| Quantized KV and verify kernels with more than 8 rows "can leave the optimized path" (IMPROVEMENTS) | user rule: do not quantize the KV cache; the 8-column limit mechanism is known but not timed (MU1 hypothesis) | MU1 in [Hypotheses](#speculative-decoding) |
 
-### 2026-10-29 N1 DFlash draft replay check
+More: [PERFORMANCE-RECORDS.md](PERFORMANCE-RECORDS.md) holds every dated record, unedited.
 
-27B Q8_0, DFlash5, 512 tokens, temporary build counter and HIP-graph logs. The draft rebuilds its graph every call (273 builds, 0 reused) at 0.36 ms each: 98 ms of an 8.5 s run. The draft now runs as a single-device context on ROCm0, not on the meta backend, so meta `tg_lookup` and uids do not apply. The ggml-cuda HIP-graph path replays it anyway: the generate graph (691 nodes) replayed 67 times with 2 re-captures; the inject graph (58 nodes) also replays. The 129 captures and 17400 `hipLaunchKernel` in the trace come from the target's TP lanes. Upper bound of the fix: about 0.7 ms of an 80 ms step, below the noise (DFlash5 57.3 and 60.1 t/s on equal builds). [Notes and instrumentation patch](old-ignore/2026-10-29/n1-dflash/).
-
-### 2026-10-29 per-token host gap (N2)
-
-`rocprofv3` kernel, HIP runtime and memcpy trace of TG32 on master, last 20 tokens. Profiled TG was 25.3 (27B) and 21.4 (Flash Next) against 36.6 and 39.1 unprofiled, so host times are upper bounds. [Record](old-ignore/2026-10-29/tg-host-gap/diagnosis.md), [attribution follow-up](old-ignore/2026-10-29/tg-host-gap/option1.md).
-
-- 27B: both GPUs idle 1.04 ms/token, mostly one 0.45-0.6 ms gap after the end-of-token sync (logits readback, then 4-5 rounds of event wait, small H2D copies and `hipStreamSynchronize`).
-- Flash Next: both GPUs idle 4.48 ms/token. About 70 small `hipMemcpyAsync` and about 10 stream syncs before each launch, about 1.7 ms host time.
-- llama's per-token `set_input` writes only to pinned host buffers. All pre-launch GPU copies come from the scheduler's split-input path; most already use the fork's async staging, and the rest are synchronous only because of the 4096 B F32 staging cap. Raising the cap (N2b) and overlapping lane launches (N2a) changed nothing.
-
-### 2026-10-29 scale-fold attempt
-
-Folding the `1/hc` SCALE after `hc_attn_down`/`hc_ffn_down` (Q8_0 [10240 x 320], repacked) into the repacked Q8_0 mat-vec store built and matched master output, but a TG32 kernel trace showed identical kernel counts on both builds (116873 on Agent 1, 10145 `scale_f32`), so the fusion never fired. The branch was dropped without finding why. Each `scale_f32` takes about 4.2 us with no dispatch gap before it.
-
-### 2026-10-29 ideas from external reviews
-
-- [Strata](https://github.com/Niko1221/Strata) (MIT, `870aedd9e1eb`): code-only review; its gfx906 results are community MI50 reports at IQ1_M-IQ3_XXS and are not comparable. Gave S1-S5. Lower value: fused gate/up + SwiGLU + q8_1 epilogue (off on gfx906 in Strata), attention query LDS swizzle (+1.2% PP at 64K only), HIP graph node priorities (NVIDIA only). Accuracy-costing features excluded. [Review](old-ignore/2026-10-29/strata-review/README.md).
-- [llama-cpp-optimization-lab](https://github.com/Abzolute1/llama-cpp-optimization-lab) (`5408613e`, no license, NVIDIA only, experts in host RAM, own numbers not reproduced): mostly CPU/PCIe expert offload, which does not apply. Gave L1 and the rejected ngram-mod fallback. Its rejection of CPU micro-kernel wins that did not show end to end is a caution for S2 and S4. [Review](old-ignore/2026-10-29/optlab-review/README.md).
-
-### 2026-10-29 rebuild on official 36a0e2ffc
-
-Matched llama-bench, `-sm tensor`, 50/50, FA on. 27B: batch/ubatch 2048, PP2048/TG128, r2. Flash Next: Q8_0 KV, batch/ubatch 1024/512, r2 plus a separate r5. A is the old master on 418f905a4; B-D are rebuild stages. All builds use `-mllvm -amdgpu-sched-strategy=max-ilp` and CXX `-O3` (without them 27B is about 2-3% slower). [Rebuild record](old-ignore/2026-10-29/rebuild/README.md).
-
-| Stage | 27B PP2048 | 27B TG128 | Flash Next PP2048 | Flash Next TG128 | Flash Next r5 PP / TG |
-| --- | ---: | ---: | ---: | ---: | --- |
-| U: official 36a0e2ffc | 448.60 | 32.77 | 302.99 | 39.66 | 304.33 +- 3.78 / 39.76 |
-| A: old master e04bc2e38 | 684.56 | 36.82 | 527.79 | 38.99 | - |
-| B: cleanup and fixes | 682.92 / 684.19 | 36.96 / 36.61 | 525.73 / 528.13 | 38.34 / 39.56 | 509.92 +- 17.95 / 39.23 |
-| C: no pipeline stages | 685.60 | 36.58 | 520.22 | 36.93 +- 2.78 | 516.43 +- 7.96 / 38.79 |
-| D: DSV4/MiniMax/MiMo back to upstream | 685.34 | 36.67 | 527.63 | 39.09 | 520.11 +- 7.34 / 39.26 |
-
-Greedy output (96 tokens) was byte-identical across B, C and D. 27B output matches official byte for byte; Flash Next matches for about 30 tokens and then diverges, consistent with different kernel rounding (repack, fusions), not checked further.
-
-#### Speculative decoding on D (one run each)
-
-`llama-cli`, greedy, `flake.nix` prompt (about 2K tokens), 512 output tokens, context 16384. Flash Next uses the `mtp-Qwen3.8-Flash-Next-Q8_0.gguf` sidecar via `-md`. MTP runs use `--spec-type draft-mtp --spec-draft-n-max N --spec-draft-backend-sampling`. Grouped MoE was not enabled. Script: [mtp_check.sh](scripts/mtp_check.sh).
-
-| Model | Mode | Prompt t/s | Generation t/s | vs plain TG |
-| --- | --- | ---: | ---: | ---: |
-| 27B Q8_0 | plain | 462.0 | 36.2 | - |
-| 27B Q8_0 | MTP2 | 514.0 | 60.7 | +68% |
-| 27B Q8_0 | MTP3 | 557.8 | 58.0 | +60% |
-| Flash Next IQ3_XXS | plain | 348.0 | 37.2 | - |
-| Flash Next IQ3_XXS | MTP2 | 339.1 | 49.6 | +33% |
-| Flash Next IQ3_XXS | MTP3 | 349.6 | 44.5 | +20% |
-
-Draft acceptance was not recorded (`--simple-io` prints none). The CLI prompt figure varies more than llama-bench PP.
-
-### 2026-10-29 Flash Next TG profile
-
-64-token capture on the IQ2_S candidate library (`fe34c2...`); matched unprofiled 36.71 TG, profiled 28.93 (-21%). 63 steady graph repeats; in the final 2.178 s window both GPUs had dispatches active for 1.905 s. Per-GPU sums and unions overlap, so they cannot be added into a critical path. The raw trace and `summarize.py` are outside the repository.
-
-| Kernel group | ROCm0 sum | ROCm1 sum | Two-GPU union | Union per repeat |
-| --- | ---: | ---: | ---: | ---: |
-| Non-expert Q6_K/type-14 and q8_0-repacked mat-vecs | 377 ms | 401 ms | 628 ms | 9.97 ms |
-| TP AllReduce | 327 ms | 65 ms | 336 ms | 5.33 ms |
-| IQ2_S, IQ4_NL and IQ3_S expert mat-vecs | 199 ms | 215 ms | 295 ms | 4.69 ms |
-| Float mat-vecs | 195 ms | 194 ms | 278 ms | 4.41 ms |
-| Routing and MoE reduction | 100 ms | 109 ms | 152 ms | 2.41 ms |
-| Position/attention, hyper-connections, GDN/SSM | 142 ms | 153 ms | 274 ms | 4.35 ms |
-
-ROCm1 per-token detail: `quantize_q8_1<32>` 484 calls 2.33 ms; `scale_f32` 303 calls 1.77 ms; float mat-vecs 288 calls 3.08 ms (main specialization 264 calls, 2.90 ms); Q6_K and Q8_0 repacked mat-vecs 496 calls 6.36 ms.
-
-### 2026-10-29 earlier checks on the official head
-
-- Official-head port: an early unrepaired 418f port measured Flash Next MTP2 PP -28%; the cause was a changed gfx906 MMQ launch traversal. After restoring row-first traversal: 347.97 / 36.77 baseline vs 351.30 / 39.51, identical output and acceptance. [Traversal check](old-ignore/2026-10-29/head-merge-validation/terra-port-fix/README.md), [validation](old-ignore/2026-10-29/head-merge-validation/README.md).
-- Quant and placement: IQ3_XXS with GPU experts 377.50 / 38.94; IQ4_XS with 8 CPU MoE layers 197.59 / 24.42 (op-offload on) and 204.92 / 25.15 (off), one run each, quant and placement changed together. Layer split 353.76 / 30.99. [Record](old-ignore/2026-10-29/quant-placement-compare/README.md).
-- IQ2_S single-token path: 396.35 / 37.20 baseline vs 398.80 / 38.08 candidate, one pair, output matched, 4,143-token prompt, 256 generated. [Record](old-ignore/2026-10-29/iq2s-single-token-experiment/README.md).
-- Grouped-MoE integration: build, replay and 18 canonical reference cases passed; the repacked harness did not finish. [Record](old-ignore/2026-10-29/grouped-moe-integration/README.md).
-
-### Before 2026-10-29
-
-| Date and workload | Setting | PP / TG | Source identity |
-| --- | --- | --- | --- |
-| Oct 12, synthetic PP2048/TG128 | Qwen3.8-27B Q8_0, plain | about 682 / 36.8 | local changes, commit unknown |
-| Oct 25, `flake.nix`, 4000 outputs | 27B MTP2 | 549.7 / 56.8 | build `11776`, `766f7c5e0` |
-| Same workload | 27B MTP3 | 545.2 / 60.0 | same |
-| Same workload | 27B DFlash7 | 543.7 / 59.9 | same |
-| Oct 25, short CLI, 256 outputs | 27B plain | 558.9 / 35.2 | `b11929-fdc8e5b65` |
-| Oct 25, Flash Next long CLI | IQ3_XXS plain | 396.9 / 37.3 | same |
-| Same workload | MTP2, Q8_0 sidecar | 368.5 / 42.9 | same |
-| Oct 25, Flash Next MTP2, short CLI | grouped MoE off / on | 330.3 / 47.65 -> 372.9 / 50.45 | local experiment on `fdc8e5b65` |
-
-One run per setting. The Oct 25 27B runs used about 6K populated tokens despite a 100K context setting, so they do not test a full context. Speculation helped single-request workloads; plain decoding was fastest in the [three-request mixed workload](old-ignore/2026-10-12/2026-10-12-three-slots.md). Target-logprob checks support greedy selection within a run, not general quality equivalence. DFlash vision, other quants, quantized KV and full contexts are untested. Records: [27B CLI](old-ignore/2026-10-25/2026-10-25-qwen3.8-27b-flake-cli.md), [Flash Next MTP](old-ignore/2026-10-25/2026-10-25-flash-next-mtp-short-check.md), [grouped MoE](old-ignore/2026-10-25/flashnext-fast/README.md), [Oct 12 profiles](old-ignore/2026-10-12/notes/2026-10-12-tp-profile-findings.md), [Oct 12 work log](old-ignore/2026-10-12/notes/2026-10-12-work-status.md).
+[rec-1121-late]: PERFORMANCE-RECORDS.md#2026-11-21-inkling-2-mini-late-nvfp4-repacked-experts-banded-prefill-attention-faster-mix-kernels
+[rec-1121-c]: PERFORMANCE-RECORDS.md#2026-11-21-inkling-2-mini-crash-fix-fused-ops-nvfp4-baseline
+[rec-1121-u]: PERFORMANCE-RECORDS.md#2026-11-21-catch-up-to-official-46eb1742d
+[rec-1118]: PERFORMANCE-RECORDS.md#2026-11-18-catch-up-to-official-edec462cc
+[rec-1106-f2]: PERFORMANCE-RECORDS.md#2026-11-06-f2-p4-toolchain-check-and-acceptance-aware-speculative-runs
+[rec-1106-m]: PERFORMANCE-RECORDS.md#2026-11-06-flash-next-ud-iq3_xxs-at-100k-with-mtp
+[rec-1106-q]: PERFORMANCE-RECORDS.md#2026-11-06-flash-next-big-quants-repack-conversion-q8_0-n-gram-table-100k-and-mtp-fit
+[rec-1106-s]: PERFORMANCE-RECORDS.md#2026-11-06-s2-cheaper-iq-sign-handling-on-gfx906
+[rec-1105-s]: PERFORMANCE-RECORDS.md#2026-11-05-27b-config-sweep-and-32k-depth
+[rec-1105-c]: PERFORMANCE-RECORDS.md#2026-11-05-catch-up-to-official-4b77dee05
+[rec-1029-a1]: PERFORMANCE-RECORDS.md#2026-10-29-a1-config-sweep-tg
+[rec-1029-n1]: PERFORMANCE-RECORDS.md#2026-10-29-n1-dflash-draft-replay-check
+[rec-1029-n2]: PERFORMANCE-RECORDS.md#2026-10-29-per-token-host-gap-n2
+[rec-1029-x]: PERFORMANCE-RECORDS.md#2026-10-29-ideas-from-external-reviews
+[rec-1029-rb]: PERFORMANCE-RECORDS.md#2026-10-29-rebuild-on-official-36a0e2ffc
+[rec-1029-prof]: PERFORMANCE-RECORDS.md#2026-10-29-flash-next-tg-profile
+[rec-1029-e]: PERFORMANCE-RECORDS.md#2026-10-29-earlier-checks-on-the-official-head
