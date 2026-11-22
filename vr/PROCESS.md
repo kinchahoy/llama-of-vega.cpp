@@ -1,13 +1,17 @@
 # Process: how this fork finds performance
 
+Read [GOALS.md](GOALS.md) first for the owner's intent, target workload (50-100K+ PP+TG, 1-4 parallel slots), and deviation rules.
+
 The owner chose this process on 2026-11-22. It replaces "profile, try things, benchmark a lot". The old way cost wall clock, GPU power, and two wrong cost models that stood for 22 and 23 days (see [Why this process](#why-this-process)). Constants live in [HARDWARE-CARD.md](HARDWARE-CARD.md); numbers, routes and the worklist live in [PERFORMANCE.md](PERFORMANCE.md).
 
 ## Order of work
 
-The owner's rule (2026-11-22): "I generally believe we need real kernel changes / code to deliver genuine improvements. Parameter tweaking (e.g. split between gpus or ubatch or mtp is our last stage not our first, only do that when we agree kernel level improvements are tapped out and w my permission".
+The owner's rule (2026-11-22, refined in [GOALS.md](GOALS.md)): kernel and architecture changes come before aimless parameter tuning, with a preference for reusable wins that carry forward to upcoming models (e.g. Qwen 4).
 
-- First: kernel and code changes. This means kernel layout, fused ops, formats on the tuned path, and graph changes.
-- Last, and only after the owner agrees that kernel-level work is tapped out and gives permission: parameter tuning. This means the GPU split (such as `-ts`), ubatch and batch sizes, MTP and speculative settings, thread counts, and serving presets used as a speed lever.
+- First: reusable kernel and code changes (long-context attention, GDN/SSM, MoE, multi-slot mat-vec, TP/AllReduce, repacked quants), then model-specific kernel/code wins.
+- Alongside architecture work (not banned): architectural GPU-level placement and sizing decisions (e.g. which GPU holds KV cache vs. draft/MTP head given MI60 vs. MI50 asymmetry, or arch-driven ubatch sizing).
+- Always permitted as measurements (not tuning): fast diagnostic env checks (e.g. `HIP_FORCE_DEV_KERNARG=1`) and hardware/kernel cost curves (e.g. `llama-bench -p 1..16` for multi-slot/verify kernel design).
+- Last, and only after the owner agrees that kernel-level work is tapped out and gives permission: parameter tuning (MTP2 vs MTP3 depth sweeps, thread counts, `-ts` micro-tweaks, serving presets used as a speed lever).
 - A parameter change that is needed for correctness, or to run a required comparison (for example the settings that AGENTS.md or the final validation pass fix), is not tuning.
 - Worklist rows carry a `kind` tag for this. Parameter rows are in their own table at the end of the [worklist](PERFORMANCE.md#parameter-tuning---last-stage-needs-owner-permission).
 
@@ -48,7 +52,9 @@ Write these five lines before any experiment and keep them in the record ([recor
 
 ## Tools
 
-- `python3 vr/scripts/kernel_budget.py TRACE_DIR N_TOKENS` turns one `rocprofv3` kernel trace into a ranked work list. It splits the kernels into three classes from the launch geometry in the trace: at the floor (only fewer launches help), one block and above the floor (apply the one-block rule), and many blocks above the floor (real work; check bytes against the mat-vec bandwidth on the card). First run, 2026-11-22, on the Flash Next trace: it listed five one-block kernels above the floor that were in no hypothesis list (`topk_moe_wave_cuda<512, 10>` 1 block of 32 threads at 14.1 us, `lightning_indexer_kernel_vec`, `k_argsort_f32_i32`, `rope_multi`, `top_k_mask_kernel`; 0.92 ms excess per token per GPU in total, B, one trace). `vr/scripts/token_budget.py` makes the older step-by-step budget ([TOKEN-BUDGET.md](TOKEN-BUDGET.md)).
+- `python3 vr/scripts/kernel_budget.py TRACE_DIR N_TOKENS` turns one `rocprofv3` kernel trace into a ranked work list. It splits the kernels into three classes from the launch geometry in the trace: at the floor (only fewer launches help), one block and above the floor (apply the one-block rule), and many blocks above the floor (real work; check bytes against the mat-vec bandwidth on the card).
+  - **Skeptical caveats (2026-11-22)**: (1) `kernel_budget.py` is hardcoded to 1-slot depth-0 TG (`-p 0 -n N`) and misses long-context (50-100K), multi-slot (2-4 slots), and PP bottlenecks. (2) Dropping the first 1/3 of launches and dividing by `n_tok * 2 / 3` distorts per-token counts whenever warmup/load differs from decode. (3) Subtracting the 4.2 us empty-kernel floor from non-trivial one-block kernels (`topk_moe`, `k_argsort`) over-estimates recoverable savings. (4) Grouping by kernel name and averaging across both GPUs merges distinct shapes and hides MI50 (ROCm1) small-kernel lag. (5) Using 2.2 us/launch over-prices fusion under captured HIP graphs (~1.22 us/node microbench, 1.5-1.9 us saved in ABBA).
+  - First run, 2026-11-22, on the Flash Next trace: it listed five one-block kernels above the floor that were in no hypothesis list (`topk_moe_wave_cuda<512, 10>` 1 block of 32 threads at 14.1 us, `lightning_indexer_kernel_vec`, `k_argsort_f32_i32`, `rope_multi`, `top_k_mask_kernel`; 0.92 ms raw excess over empty floor, realistic savings lower). `vr/scripts/token_budget.py` makes the older step-by-step budget ([TOKEN-BUDGET.md](TOKEN-BUDGET.md)).
 - Kernel sandbox: standalone microbenchmarks that compile in seconds and need no model. Examples: [single_block_bench.cpp](investigation-notes/2026-11-22-one-block-rule/single_block_bench.cpp) (one-block cost, threads per block, phases, two-kernel form) and [launch_floor_bench.cpp](investigation-notes/2026-11-21-inkling2-mini/launch_floor_bench.cpp) (`clang++ -x hip --offload-arch=gfx906 -O3 -std=c++17 ... -pthread`). Tune block size and similar parameters here.
 - Scripts for runs are in [investigation-notes/2026-11-21-inkling2-mini](investigation-notes/2026-11-21-inkling2-mini/).
   1. Kernel profile: `kernel_profile.sh` (one GPU) or the profile part of `ppl_and_focus_profiles.sh` (two GPUs). It runs `rocprofv3 --kernel-trace` on `llama-bench -p 0 -n 64` and prints calls and time per kernel from the sqlite file. Skip the first third of the launches (load and warmup).

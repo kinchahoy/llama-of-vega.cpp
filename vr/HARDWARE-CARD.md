@@ -176,8 +176,18 @@ Surprises: the duplex does not cost more than the one-way; 20 KB is faster than 
 
 - Occupancy: blocks resident per compute unit = min(floor(4 x min(8, floor(256 / VGPRs)) / ceil(threads / 64)), floor(65536 / LDS bytes)). The second argument of `__launch_bounds__` is waves per SIMD, not blocks. This is the rule behind the `flash_attn_ext_vec` fix (more than 128 VGPRs gave 2 blocks per compute unit). A grid above the resident count costs one more round each time. The occupancy scan of all kernels (worklist BA-4) can now be done from the trace columns with no GPU time.
 - Streaming: the peak is 891 GB/s on the MI60 and 904 GB/s on the MI50, but a small buffer does not reach it. 3.5 MB costs 5.0 us at best (512 blocks of 128 threads); grids of 512 blocks or fewer reach at most 83% of the peak; 90% needs at least 32 MB per launch. Read with coalesced 16-byte chunks across the threads of a block: one contiguous run per thread is up to 10 times slower. This prices the Flash Next `dsv4_hc_mix_down` / `_up` route (TB2 / F2b): they stream about 3.5 MB and cost about 10 us untraced, against 5.0 us measured for that size, so about 5 us per call each, 98 calls per token per GPU, about 1.0 ms per token per GPU (C, from the card; the four variants tried on 2026-11-22 did not change the block layout).
-- Cross-GPU exchange: a host-staged duplex exchange costs about 17 us + bytes / 3.46 GB/s, with a floor of 25 to 41 us below 40 KB (10 KB: 41 us, 20 KB: 25 us); a kernel plus a sync is 9.7 us (MI60) and 11.7 us (MI50). The AllReduce kernel shows 20.0 us (27B) and 25.8 us (Flash Next) per call in the traces, so the exchange already sits at the floor of host staging on this board (C: card against one trace each). Faster AllReduce needs fewer exchanges per token or a different link, not a faster copy.
+- Cross-GPU exchange: a host-staged duplex exchange via `hipMemcpyAsync` + host sync costs about 17 us + bytes / 3.46 GB/s, with a floor of 25 to 41 us below 40 KB (10 KB: 41 us, 20 KB: 25 us); a kernel plus a sync is 9.7 us (MI60) and 11.7 us (MI50). **Correction (2026-11-22)**: earlier text concluded `ggml_cuda_ar_kernel` (20.0 us on 27B, 25.8 us on Flash Next in traces) already sat at this floor; see [Skeptical corrections (2026-11-22)](#skeptical-corrections-2026-11-22) below.
 - Open on the card: at 3.5 MB, geometries with blocks x threads = 131072 drop to 82 GB/s (not explained); a 20 KB exchange is faster than 2.5 KB and 10 KB (repeatable, not explained); the 1.22 us per node in a replayed graph has no saved source.
+
+## Skeptical corrections (2026-11-22)
+
+1. **Graph-replayed launch cost vs. 2.2 us pricing**: Decode on all three models runs inside captured HIP graphs. The card records 1.22 us per node in a replayed graph (source not saved yet) and 1.5 to 1.9 us saved per removed launch in Inkling ABBA kill-switch tests (which includes kernel work removed, not just launch overhead). Using 2.2 us per removed launch over-prices graph-replayed fusion by ~1.2x to 1.8x. Use **1.5 to 1.8 us** (upper bound) or **1.22 us** (pure launch floor) for graph-replayed decode until the graph-node microbench is saved and re-verified on both GPUs.
+2. **AllReduce floor category error**: Q3 measured explicit `hipMemcpyAsync` DMA copies plus host `hipStreamSynchronize` (25 to 41 us below 40 KB). Decode `ggml_cuda_ar_kernel` does *not* use `hipMemcpyAsync` or host syncs -- it uses GPU-kernel-polled mapped pinned host memory (which is why it already runs in 20 us traced vs. 40 us for Q3 DMA at 2.5-10 KB). Therefore Q3 bounds **prefill DMA staging**, not kernel-polled decode AllReduce (`AR-LL` is not ruled out by Q3, though its decode ceiling remains modest at ~0.5-0.6 ms/token).
+3. **MI60 (ROCm0) vs. MI50 (ROCm1) asymmetry reconciled**:
+   - **HBM2 streaming (bandwidth-bound decode / KV reads)**: equal (~891 GB/s MI60 vs. 904 GB/s MI50; 27B mat-vec only 1.1% slower on MI50).
+   - **Compute-bound PP GEMM**: MI50 is ~21% slower (60 CUs / 178 W cap vs. 64 CUs / 225 W).
+   - **Small-kernel dispatch**: MI50 is 0.6 us slower bare (2.6 vs. 2.0 us) and 20-40% slower on tiny decode kernels (suspected chipset PCIe lanes; test with `K2`).
+   - Placement implication: putting bandwidth-heavy work (KV cache, decode-heavy draft) on MI50 is cheap; putting compute-heavy PP or long chains of tiny serial kernels on MI50 hurts.
 
 ## Rules derived from the card
 
@@ -194,7 +204,7 @@ One thread block gets about 1/30 of the GPU. A kernel that must reduce over a wh
 
 ### Value of a removed launch
 
-One launch removed per token is worth about 2.2 us per GPU (C, derived). One launch removed per layer pass is worth 2.2 us x passes. Work near the roofline is not removed by fusing launches.
+One launch removed per token in a captured HIP graph is worth roughly **1.22 us** pure launch floor (B, unsaved microbench) up to **1.5 to 1.9 us** total including trivial kernel work (A, Inkling ABBA). Earlier estimates used 2.2 us (C, derived), which over-prices graph-replayed fusion; check both bounds before building small (<2%) fusions. Work near the roofline is not removed by fusing launches.
 
 ## Checks of the card against real kernels
 
