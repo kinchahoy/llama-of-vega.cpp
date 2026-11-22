@@ -44,7 +44,7 @@ Zero-GPU-hour audits of saved `rocprofv3` traces (with calibrated Q1 occupancy i
 
 ### External comparison: `iacopPBK/gfx906-quartz` (2026-11-22, code read only)
 
-Standalone C++/HIP engine (~11.7K LOC, no tests): Qwen3.8-27B Q8_0 only, exactly 2 gfx906 with PCIe P2P (`devices.h:30-31` refuses to start otherwise), 1 request at a time, MTP or DSpine draft always on, F16 KV. Its own claims (grade B, 2x MI50 with P2P, short prompts): **777 PP2048** (631 @ 16K) vs our ~590-614; MTP greedy **93 t/s** decode vs our MTP2 ~62-65. No long-context decode or multi-slot numbers. Peer-write AllReduce needs P2P, which this host lacks, so a fair A/B needs a P2P box. Reusable ideas are linked from `G1`, `MU1(b)`, `TB3`, `SP1` below; also `pf_gemm` (`prefill.h:23`, int8 GEMM with fused gate+up+SiLU epilogue) for PP.
+Standalone C++/HIP engine (~11.7K LOC, no tests): Qwen3.8-27B Q8_0 only, exactly 2 gfx906 with PCIe P2P (`devices.h:30-31` refuses to start otherwise), 1 request at a time, MTP or DSpine draft always on, F16 KV. Its own claims (grade B, 2x MI50 with P2P, short prompts): **777 PP2048** (631 @ 16K) vs our ~590-614; MTP greedy **93 t/s** decode vs our MTP2 ~62-65. No long-context decode or multi-slot numbers. Peer-write AllReduce needs P2P: on this host `hipDeviceCanAccessPeer` is 0 both ways, also with `HSA_FORCE_FINE_GRAIN_PCIE=1` (checked 2026-11-22), so quartz cannot run here and a fair A/B needs a P2P box. Reusable ideas are linked from `G1`, `MU1(b)`, `TB3`, `SP1` below; also `pf_gemm` (`prefill.h:23`, int8 GEMM with fused gate+up+SiLU epilogue) for PP.
 
 ## Method & testing
 
