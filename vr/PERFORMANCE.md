@@ -1,6 +1,6 @@
 # Performance Live Status & Worklist
 
-Read [GOALS.md](GOALS.md) first (target: ~60% single-slot 50-100K+ PP+TG, ~40% 2-4 parallel slots, equal priority on 27B / Flash Next / Inkling 2 Mini + Qwen 4 readiness). Hardware constants live in [HARDWARE.md](HARDWARE.md); chronological history and raw benchmark logs live in [BENCHMARK-TIMELINE.md](BENCHMARK-TIMELINE.md); build/merge rules live in [MAINTENANCE.md](MAINTENANCE.md).
+Read [GOALS.md](GOALS.md) first (target: long-context 50-100K+ PP+TG, 1-4 parallel slots, equal priority on 27B / Flash Next / Inkling 2 Mini + Qwen 4 readiness). Hardware constants live in [HARDWARE.md](HARDWARE.md); chronological history and raw benchmark logs live in [BENCHMARK-TIMELINE.md](BENCHMARK-TIMELINE.md); build/merge rules live in [MAINTENANCE.md](MAINTENANCE.md).
 
 ## Current numbers (2026-11-22 validated baseline)
 
@@ -19,11 +19,11 @@ Reference serving/speculative baselines (see [BENCHMARK-TIMELINE.md](BENCHMARK-T
 
 ## 2026-11-22 skeptical review & BA-4 audit findings
 
-Zero-GPU-hour audits of saved `rocprofv3` traces (with calibrated Q1 occupancy in [scripts/kernel_budget.py](scripts/kernel_budget.py)), kernel source, and external repos revealed much higher-leverage targets for our 50-100K+ 1-4 slot + Qwen 4 workload than the old short-context `Batch 1`:
+Zero-GPU-hour audits of saved `rocprofv3` traces (with calibrated Q1 occupancy in [scripts/kernel_budget.py](scripts/kernel_budget.py)), kernel source, and external repos revealed much higher-leverage targets for the 50-100K+ 1-4 slot + Qwen 4 workload than the old short-context `Batch 1`:
 
 1. **`fattn-tile.cuh` missing all-`-INFINITY` QSA/SWA tile skip (~20 LOC)**: On sparse QSA (Flash Next, Qwen 4) and SWA layers, `flash_attn_tile` evaluates masked-out KV tiles instead of skipping tiles whose mask is all `-INFINITY`. Skipping them eliminates **94-98% of KV tile compute at 32K-100K** on Flash Next and Qwen 4 (massive PP + TG win).
 2. **`G1` padded `ncols2=8` for 6:1 and 12:1 GQA (~45 LOC)**: 27B (6:1 GQA) currently falls back to `ncols2=2`, reading the F16 KV cache 3x per token (and even worse across 4 parallel slots). Padded `ncols2=8` reads KV once for all 6 Q heads and packs 4 slots into 1 KV pass: **-1.7..2.0 ms/tok @ 32K** and **-5.5..6.5 ms/tok @ 100K** on both Qwen3.8-27B and upcoming Qwen 4 27B.
-3. **Inkling PP4K+ SWA ring-wrap banded-attention fallback (~965 ms = 20% of PP4096)**: When Inkling's SWA ring wraps at PP >= 4K, `fattn_banded_tile_usable()` drops to the 1,306-LOC non-matrix-unit fallback in `fattn-banded.cu`, burning 965 ms (20% of PP4096). Handling ring-wrap in the tile path removes the cliff and unlocks pruning `fattn-banded.cu`.
+3. **Inkling PP4K+ SWA ring-wrap dense-bias fallback (~965 ms = 20% of PP4096)**: When Inkling's SWA-1024 ring wraps at PP >= 4K, `get_swa()->get_n_kv_pos_contiguous()` (`src/models/inkling2.cpp:354`) returns 0, causing 40/48 attention passes to fall back from banded `flash_attn_tile` to dense attention with full relative-bias materialization (`cpy_scalar` 520 ms + `cpy_scalar_contiguous` 212 ms + `k_bin_bcast` 97 ms + `k_get_rows` 42 ms + 93 ms slower FA = ~965 ms, 20% of PP4096). Handling ring-wrap in the banded tile path removes the cliff.
 4. **BA-4 register spill hit (`flash_attn_tile<128,128,64>`)**: Spills **1,040-1,072 B/thread** to scratch memory, costing **655 ms (13.5% of PP4096)** and **158 ms (6.1% of PP2048)** on Inkling (and affects `D=128` tile prefill broadly).
 5. **`MU1(b)` 9..16 token multi-slot & verify cliff**: Above `MMQ_RP_Q8_MMV_MAX_TOKENS = 8`, dense repacked mat-vec drops from `nc` to `w32`, and MoE drops narrow MMV + fused GLU straight to `w32` (wasting **94-97% of lanes** on 1-2 tokens/expert). Explains why 4-slot MTP2 server TG collapses from 81 -> 61 t/s. Look at `alex4300`-style wide-GEMV with LDS activation staging for 2-16 columns.
 6. **`allreduce.cu` dynamic block cap (~5 LOC)**: Launches fixed grids where 5-6 idle blocks spam `3x __threadfence_system()` + PCIe polls on every single AllReduce (128x/tok on 27B, 96x/tok on FN). Capping blocks to actual work removes redundant cross-PCIe fence traffic.
@@ -36,15 +36,15 @@ Zero-GPU-hour audits of saved `rocprofv3` traces (with calibrated Q1 occupancy i
 9. **Tiny surgical bugs found in code audit**:
    - `fattn-vec.cuh`: missing `any_weight` zero-skip on V under `V_DOT2_F32_F16_AVAILABLE`.
    - `qwen4exp_conv_windows`: fires **9 launches/layer** under MTP verify.
-   - `P4` (`SGEMM_F32`): missing stride/dimension guards (`ne11 <= 65535`, `ne00` match) and over-broad `"hc_"` tensor name match; Q8-reference KLD still unmeasured.
-   - `F2` (`DSV4_HC_MIX`): wave32 abort/guard hazard on non-wave64 builds.
+   - `P4` (`SGEMM_F32`): stride/shape bounds, 8192 scratch cap, and anchored tensor-name guards hardened on 2026-11-22; Q8-reference KLD still pending.
+   - `F2` (`DSV4_HC_MIX`): wave32 `warp_size` and cross-tensor shape guards hardened in `ggml-cuda.cu` on 2026-11-22.
    - `unsloth #241`: missing empty-graph guard.
 10. **Qwen 4 convergence & external prior art**: Qwen 4 converges on **3:1 GDN + QSA**, **6:1 GQA on 27B**, and **hyper-connections (HC) on both 27B and MoE** -- making QSA tile skip, `G1`, `TB3` (GDN), `MU1(b)`, and HC fixes directly reusable. Check upstream PR `#30370` (GCN sparse FA) and `milpster` `__vsub4` word-op improvements before writing custom code.
 11. **Cost-model & tooling fixes**: Upgraded [scripts/kernel_budget.py](scripts/kernel_budget.py) fixes the old 1/3-drop denominator bug (giving exact steady-state counts: 27B **1,595**, FN **2,747**, Inkling **4,275/4,056**), groups by full launch geometry, flags spills/low-occupancy/MI60-vs-MI50 asymmetry, and prices graph-replayed launch removal at **1.22-1.7 us** instead of 2.2 us.
 
 ## Method & testing
 
-Compact version of the four-stage model-first workflow (order of work follows [GOALS.md](GOALS.md): reusable kernels & Qwen 4 first -> model-specific kernels -> architectural placement -> parameter tuning last with owner OK):
+Compact version of the four-stage model-first workflow (order of work follows [GOALS.md](GOALS.md): reusable kernels & Qwen 4 first -> model-specific kernels -> architectural placement -> parameter tuning last):
 
 1. **Learn the hardware once**: synthetic microbenchmarks in `vr/bench/` populate [HARDWARE.md](HARDWARE.md). Never spend an end-to-end run answering a question a microbench answers in seconds.
 2. **Predict from traces on disk**: run `python3 vr/scripts/kernel_budget.py TRACE_DIR` on saved `rocprofv3` SQLite traces. Read geometry (`blocks`, `VGPR`, `LDS`, `scratch`, per-GPU skew) before naming a mechanism.
@@ -76,7 +76,7 @@ Exact anchor-segmented steady-state decode counts (fixing the old 1/3-drop disto
 | --- | ---: | ---: | --- | --- |
 | **Qwen3.8-27B Q8_0** (2 GPUs, TP) | **1,595** | 128 | 96-99% | Depth 0 TG: repacked mat-vec ~69% of traced kernel time (~800 GB/s, near roof), AR ~9% (idle blocks spam fences), post-AR norm (now 2-launch), GDN ~13 tiny kernels/layer (3.2 ms). **At 32K-100K**: 6:1 GQA reads KV 3x (`G1` fixes); **4-slot MTP2**: hits >8-col `w32` cliff (`MU1(b)`). PP: repacked GEMM 76% (MI50 +21% slower), exposed AR 5.4%, attention grows to 32% at 32K. |
 | **Flash Next UD-IQ3_XXS** (2 GPUs, TP) | **2,747** | 96 | 83-88% | **3.04 ms pre-graph host token-start gap (`TB5`)** explains the 12-17% idle share. Active work: routed experts 21%, generic MMVQ (`26 IQ2_S + 21 IQ3_XXS + 3 Q2_0`, 1.75/1.83 ms + ~0.5 ms 3:2 AR skew), AR 11%, HC mix (`down` 100 VGPR = 2 b/CU; `up` 160/128 tail), QSA indexer (`lightning_indexer_kernel_vec` 136 B/thr spill) & 12-launch radix top-k, ~300 `quantize_q8_1` + glue chains. **At 32K-100K**: QSA FA misses all-`-INFINITY` tile skip. PP: stock `mul_mat_q` gate/up 23%, HC 15%, QSA FA grows to 23% at 32K. |
-| **Inkling 2 Mini** (ROCm0, 1 GPU) | **4,275** (NVFP4) / **4,056** (IQ4_NL) | 0 | 98% | Short-ctx TG: launch floor (~5.2-7.3 ms at 1.22-1.7 us/node) dominates; 4K-16K decode FA fixed by `(128,4)` (`efb85a1a5`). **PP4K+**: SWA ring-wrap hits 1,306-LOC banded fallback (**965 ms = 20% PP4096**); `flash_attn_tile<128,128,64>` spills **1,040-1,072 B/thr** (**655 ms = 13.5% PP4096**, 158 ms = 6.1% PP2048); small-M rocBLAS under-fill (**248 ms = 9.6% PP2048**, 244 ms = 5.0% PP4096). DSpark verify step costs 2.1-2.2 plain tokens (needs trace). |
+| **Inkling 2 Mini** (ROCm0, 1 GPU) | **4,275** (NVFP4) / **4,056** (IQ4_NL) | 0 | 98% | Short-ctx TG: launch floor (~5.2-7.3 ms at 1.22-1.7 us/node) dominates; 4K-16K decode FA fixed by `(128,4)` (`efb85a1a5`). **PP4K+**: SWA ring-wrap falls back to dense attention + bias materialization (**965 ms = 20% PP4096**); `flash_attn_tile<128,128,64>` spills **1,040-1,072 B/thr** (**655 ms = 13.5% PP4096**, 158 ms = 6.1% PP2048); small-M rocBLAS under-fill (**248 ms = 9.6% PP2048**, 244 ms = 5.0% PP4096). DSpark verify step costs 2.1-2.2 plain tokens (needs trace). |
 
 *Reconciled historical discrepancies*: Older docs listed 27B bandwidth as 650-715 GB/s vs ~800 GB/s (different byte/time denominators; Q2 peak is 891/904 GB/s), 27B/FN kernel counts as 1,645/2,811 (artifact of old `kernel_budget.py` dropping 1/3 of launches and dividing by `n_tok*2/3`), and launch floor as 4.2 us (profiler) vs 2.2 us (bare) vs **1.22-1.7 us** (HIP graph).
 
@@ -114,10 +114,10 @@ Ordered for [GOALS.md](GOALS.md): 50-100K+ PP+TG, 1-4 parallel slots, and Qwen 4
 - **Prefill & decode micro-wins**: `N3` (two-half PP AR pipelining, +3-5% PP); `P1/T1` (`quantize_q8_1` / `scale_f32` elimination, ~0.4-0.7 ms at graph floor); `TB1 route 2` (fused single-block radix QSA top-k); `TB4` (fold MoE weighted reduce + shared-expert add); `BA-5` (block-size tuning for two-launch `res_mix`/`add_rms_norm_mul` in sandbox); `AR-LL` (single-trip kernel-polled LL AllReduce, <=0.5-0.6 ms ceiling); `Q3 route 2` (contiguous-block Q8_0 MMV + LDS re-reduce, <=1.9 ms ceiling); `SP4` (stop charging deferred DFlash replay to TG); `L-DF10` (trace 10 ms DFlash host gap); `P2`/`W64`/`S1`/`S4`/`M2`/`TB6`.
 - **Memory fit & cleanup**: `IK9` (decode raw UE4M3 NVFP4 scales in kernel, -1.3 GiB VRAM); `U3` (unsloth shared MTP heads, -1.8 GiB); `D2`/`E1` (QSA/MoE cache under `-sm tensor`); `IK11` (log expert near-tie flips behind 0.005 ubatch KLD); `test-backend-ops` repack allocation mode; `ggml-cuda.cu` glue extraction.
 
-### Architectural placement & parked parameter tuning
+### Architectural placement & deferred parameter tuning
 
-- **Architectural placement (permitted alongside kernel work per [GOALS.md](GOALS.md))**: `IK10` (1 Inkling instance per GPU for 2-4 slots or big+small parallel serving; NVFP4 uses ~19 of 32 GiB); asymmetric KV/draft placement leveraging MI60 (faster PP/tiny kernels) vs MI50 (equal HBM2 decode streaming).
-- **Parked parameter tuning (last stage -- requires explicit owner OK)**: `MU1(a)` (slot-adaptive draft depth), `A2` (env default checks), `A1-FN` (`-ts` tweaks), `L-T16` (`-t 16`), and `A4` (physical MI50 PCIe lane relocation -- parked by software-only goal).
+- **Architectural placement (alongside kernel work per [GOALS.md](GOALS.md))**: `IK10` (1 Inkling instance per GPU for 2-4 slots or dual-model serving; NVFP4 uses ~19 of 32 GiB); asymmetric KV/draft placement leveraging MI60 (faster PP/tiny kernels) vs MI50 (equal HBM2 decode streaming).
+- **Deferred parameter tuning (last stage)**: `MU1(a)` (slot-adaptive draft depth), `A2` (env default checks), `A1-FN` (`-ts` tweaks), `L-T16` (`-t 16`).
 
 ## Routes that lost (summary of all 28)
 
@@ -134,7 +134,7 @@ A lost implementation does not close a route. Historical measurements stay in [B
 | R-IN5 | Unsloth scalar banded kernels alone | OPEN (won via tile) | Realized (+13-47% PP) | Scalar/per-query kernels halved PP (no matrix units); gfx906 tile path won |
 | L-SML | `-sm layer` on Flash Next | OPEN | none | -20% TG (single GPU active at a time); multi-req pipeline untested |
 | L-O12 | Oct 12 five quick items | OPEN | none | Quick reverts (`p-min`, `nc` unroll/fusion, MTP catchup, mirrored head); untested cleanly |
-| L-NGM | `ngram-mod` speculation fallback | OPEN (user veto) | none | Matched plain speed; user decision on file not to propose again |
+| L-NGM | `ngram-mod` speculation fallback | CLOSED (no gain) | none | Matched plain speed; dropped |
 | Q3 | Faster 27B Q8_0 mat-vec | NARROWED | <=1.9 ms (7%) | Extra loads/rows/k-split all lost (VGPR/occ); contiguous-block + LDS re-reduce untested |
 | A1-27B | Uneven `-ts` for 27B TG | NARROWED | ~1.1 ms lag (4%) | All uneven splits slowed TG (lag is in replicated small kernels); `K2`/fusions target cause |
 | L-CPY | Replace HIP 2D memcpy in `cpy` | NARROWED | ~4% MTP3 kernel time | Neutral (hot rect copies were load-time upload); tensor-split staging remains (`F1`) |
@@ -166,6 +166,6 @@ A lost implementation does not close a route. Historical measurements stay in [B
 | `flash_attn_ext_vec` slowed at 4K because it ran 1 block/head | Wrong mechanism: kernel already split keys over blocks; bottleneck was >128 VGPRs (`2 b/CU`), fixed by `__launch_bounds__(128, 4)` (`efb85a1a5`). |
 | "MI60 is 10-20% faster everywhere" / uneven `-ts` helps 27B TG | HBM2 streaming is equal (891 vs 904 GB/s); MI50 is ~21% slower in PP GEMM and +0.6 us on small kernels. Every uneven `-ts` slowed 27B TG. |
 | "FP4 / NVFP4 loses speed or precision on gfx906" | NVFP4 is Inkling's native checkpoint format; repacked as IQ4_NL nibble + split F16 scales it hits 836 PP / 47.0 TG (near IQ4_NL 879 / 49.0). |
-| "F2 and P4 are validated default-on safe" | Opinion (grade D): `P4` dispatch guards are still open and Q8-ref KLD is unmeasured. |
+| "F2 and P4 are validated default-on safe" | Opinion (grade D): `P4`/`F2` guards hardened on 2026-11-22, Q8-ref KLD for `P4` still pending. |
 | "Byte-identical greedy text or 2-chunk KLD ~0.005 proves parity" | Both Flash Next (~4.5e-3) and Inkling (~4.9e-3) have MoE near-tie KLD floors; always pair KLD with CPU-reference unit tests. |
-| Quantized KV (`-ctk q8_0`), removed env knobs, peer-write AR, `A4` = 4-7 ms | KV stays F16 per [GOALS.md](GOALS.md); ~30 sweep knobs and `tp-allreduce.cu` are archived/removed; `A4` ceiling is ~2-2.5 ms and parked by software-only goal. |
+| Quantized KV (`-ctk q8_0`), removed env knobs, peer-write AR, `A4` = 4-7 ms | KV stays F16 per [GOALS.md](GOALS.md); ~30 sweep knobs and `tp-allreduce.cu` are archived/removed; `A4` (PCIe relocation) is out of software-only scope (~2-2.5 ms ceiling). |

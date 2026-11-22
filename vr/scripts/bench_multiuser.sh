@@ -2,15 +2,22 @@
 # usage: bench_multiuser.sh OUT_DIR BUILD_A BUILD_B
 # Multi-user unified-KV check: 4 sequences x 16K prompts in one pool, then 4-way decode, on 27B Q8_0 and Flash Next.
 # Order A,B (REPS=2: A,B,B,A). Each run waits until both GPU junctions are below COOL_C (default 60).
-# Env passed to one build only: ENV_A / ENV_B (e.g. ENV_B=LLAMA_KV_ROWS_DISABLE=1).
+# Env overrides: REPS, COOL_C, THEROCK_ENV, HF_HUB_CACHE, M27, MFN, ENV_A, ENV_B (e.g. ENV_B=LLAMA_KV_ROWS_DISABLE=1).
 set -u
 OUT=$1; A=$2; B=$3; mkdir -p "$OUT"
 REPS=${REPS:-1}; COOL_C=${COOL_C:-60}
-source $THEROCK_ENV >/dev/null 2>&1
+THEROCK_ENV=${THEROCK_ENV:-}
+if [ -n "$THEROCK_ENV" ] && [ -f "$THEROCK_ENV" ]; then
+  source "$THEROCK_ENV" >/dev/null 2>&1
+elif [ -f "$HOME/.config/therock.sh" ]; then
+  source "$HOME/.config/therock.sh" >/dev/null 2>&1
+elif [ -f "$(cd "$(dirname "$0")/.." && pwd)/server/env.local.sh" ]; then
+  source "$(cd "$(dirname "$0")/.." && pwd)/server/env.local.sh" >/dev/null 2>&1
+fi
 unset GGML_CUDA_PEER_AR GGML_CUDA_TP_OVERLAP GGML_CUDA_FLASHNEXT_MOE LLAMA_KV_ROWS_DISABLE
-HUB=$HF_HUB_CACHE
-M27=$HUB/models--unsloth--Qwen3.8-27B-GGUF/snapshots/4ca720788d1e01f1bff70c033e0d0028fd02e502/Qwen3.8-27B-Q8_0.gguf
-MFN=$HUB/models--unsloth--Qwen3.8-Flash-Next-GGUF/snapshots/c8b5954a88c2775c546b92593eda40ea041d3176/UD-IQ3_XXS/Qwen3.8-Flash-Next-UD-IQ3_XXS-00001-of-00003.gguf
+HUB=${HF_HUB_CACHE:-$HOME/.cache/huggingface/hub}
+M27=${M27:-$HUB/models--unsloth--Qwen3.8-27B-GGUF/snapshots/4ca720788d1e01f1bff70c033e0d0028fd02e502/Qwen3.8-27B-Q8_0.gguf}
+MFN=${MFN:-$HUB/models--unsloth--Qwen3.8-Flash-Next-GGUF/snapshots/c8b5954a88c2775c546b92593eda40ea041d3176/UD-IQ3_XXS/Qwen3.8-Flash-Next-UD-IQ3_XXS-00001-of-00003.gguf}
 hot() { rocm-smi --showtemp 2>/dev/null | awk '/junction/ {t=$NF+0; if (t>m) m=t} END {print m+0}'; }
 
 order="A B"; [ "$REPS" = 2 ] && order="A B B A"

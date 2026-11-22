@@ -9,7 +9,8 @@ Read [GOALS.md](GOALS.md) for priorities and [HARDWARE.md](HARDWARE.md) for meas
 Use the local TheRock ROCm environment with exact comparison flags (`max-ilp` and `-O3` are worth 2-3% on 27B):
 
 ```bash
-source $THEROCK_ENV
+# Optional: source your ROCm / TheRock environment if not on PATH
+# source "${THEROCK_ENV:-/path/to/therock.sh}"
 cmake -S . -B "$CAND" \
   -DGGML_HIP=ON -DGGML_HIP_GRAPHS=ON -DGGML_HIP_RCCL=OFF \
   -DGGML_HIP_NO_VMM=ON -DGGML_HIP_MMQ_MFMA=ON \
@@ -21,7 +22,7 @@ cmake -S . -B "$CAND" \
 cmake --build "$CAND" --target llama-cli llama-completion llama-server llama-bench llama-batched-bench vr-test-gfx906-tp vr-test-flashnext-moe -j 8
 ```
 
-- **Build-retention policy**: Retain **1-2 well-tested performant timestamped builds** in addition to the active working build (`build-current` and `build-previous` symlinks in the repo root; currently `build-current -> build-dspark-20261122`, `build-previous -> build-final-20261122`).
+- **Build-retention policy**: Retain **1-2 well-tested performant timestamped builds** in addition to the active working build (`build-current` and `build-previous` symlinks in the repo root, e.g. `build-current -> build-<tag>-<date>`).
 - **Never rename or move a build directory**: CMake embeds the absolute build path into binary `RUNPATH`, so renaming breaks shared-library lookup. Point symlinks with `ln -sfn` instead. Never rebuild a retained baseline directory in place.
 - Keep `GGML_HIP_RCCL=OFF` on this host (MI50 sits on chipset PCIe lanes; no P2P). Keep `GGML_HIP_GRAPHS=ON`.
 
@@ -42,7 +43,7 @@ cmake --build "$CAND" --target llama-cli llama-completion llama-server llama-ben
 | MoE id counting sort (unsloth #264) | Device counting sort for `n_tokens >= 512`, skips out-of-slice TP expert ids, emits `expert_bounds` | `ggml/src/ggml-cuda/mmid.cu` | `GGML_CUDA_MOE_COUNTING_SORT=0` |
 | Speculative replay, rollback & TP splits | MTP prompt replay + KV-only prefill, DFlash persistent taps + single-GPU drafter, plane-indexed multi-slot recurrent rollback, tied output head split, shared-expert split, host n-gram/PLE placement, deterministic wide-row `top-k.cu` | `common/speculative.cpp`, `src/llama-context.cpp`, `llama-graph.cpp`, `llama-memory-recurrent.cpp`, `ggml/src/ggml-cuda/top-k.cu` | default on |
 
-Lineage: built on [mixa3607/mx-llama.cpp](https://github.com/mixa3607/mx-llama.cpp), [iacopPBK/llama.cpp-gfx906](https://github.com/iacopPBK/llama.cpp-gfx906), and Stastez's host-staged ROCm AllReduce (PR #27825). Removed permanently in the 2026-10-29 rebuild and 2026-11-21 cleanup (do **not** restore during merges): multi-stage pipeline TP (`-tps`), fork-only DeepSeek V4/V4.1 / MiniMax-M2 / MiMo-2 code, peer-write AllReduce (`tp-allreduce.cu` / `GGML_CUDA_PEER_AR`), and ~30 sweep-only env knobs (`GGML_RP_*`, `GGML_CUDA_TP_OVERLAP`, `LLAMA_DFLASH_*`, etc.). Keep the separate `separate-experiment` worktree out of this patch chain.
+Lineage: built on [mixa3607/mx-llama.cpp](https://github.com/mixa3607/mx-llama.cpp), [iacopPBK/llama.cpp-gfx906](https://github.com/iacopPBK/llama.cpp-gfx906), and Stastez's host-staged ROCm AllReduce (PR #27825). Removed permanently in the 2026-10-29 rebuild and 2026-11-21 cleanup (do **not** restore during merges): multi-stage pipeline TP (`-tps`), fork-only DeepSeek V4/V4.1 / MiniMax-M2 / MiMo-2 code, peer-write AllReduce (`tp-allreduce.cu` / `GGML_CUDA_PEER_AR`), and ~30 sweep-only env knobs (`GGML_RP_*`, `GGML_CUDA_TP_OVERLAP`, `LLAMA_DFLASH_*`, etc.).
 
 ## Repacked-weight layout & quant coverage
 
@@ -108,7 +109,7 @@ Every one of these merged or compiled cleanly on past upstream catch-ups but sil
 
 ## Weekly upstream catch-up procedure
 
-1. **Clean start**: Human commits and pushes the reviewed current branch first. Agents never commit or push. Keep `BASE` pointing at `build-current` (resolved real path; never touch it).
+1. **Clean start**: Start from a clean, committed `main`. Keep `BASE` pointing at `build-current` (resolved real path; never touch it).
 2. **Merge in git**:
    ```bash
    git config rerere.enabled true
@@ -125,7 +126,7 @@ Every one of these merged or compiled cleanly on past upstream catch-ups but sil
    printf '%s\n' "$UPSTREAM_HEAD" > "$OUT/upstream-source.txt"
    git merge --no-commit --no-ff "$UPSTREAM_HEAD"
    ```
-   Resolve conflicts, run `git rerere`, review auto-merged callers against all 14 silent merge traps above. For background agents that cannot write to the main checkout, use a worktree from reviewed HEAD while keeping `BASE` and `CAND` as absolute paths in the main repo root.
+   Resolve conflicts, run `git rerere`, and review auto-merged callers against all 14 silent merge traps above.
 
 ### One final validation pass
 
@@ -134,7 +135,7 @@ Every one of these merged or compiled cleanly on past upstream catch-ups but sil
    - Diff graph builders and kernel geometry (`blocks`, `threads`, `launch_bounds`, `LDS`, fusion conditions) and predict any cost change from [HARDWARE.md](HARDWARE.md).
    - Confirm `ggml/src/ggml-cuda/allreduce.cu` compiles the host-staged path for HIP by default with no env switch (`AGENTS.md` check; excluding HIP cost -21% PP / -38% TG on 2026-09-29).
 2. **Build once**: Configure and build `$CAND` using the exact build flags at top of this doc. Record `git diff --binary HEAD > "$OUT/candidate-changes.patch"`, `CMakeCache.txt`, `sha256sum`, and `ldd` outputs. Unset `GGML_CUDA_PEER_AR` and `GGML_CUDA_TP_OVERLAP`.
-3. **One end-to-end comparison** (requires explicit user OK, start below 60 C, `--offline`, identical cached files):
+3. **One end-to-end comparison** (start below 60 C, `--offline`, identical cached files):
    ```bash
    for label in baseline candidate; do
      if [ "$label" = baseline ]; then BUILD="$BASE"; else BUILD="$CAND"; fi
@@ -145,14 +146,14 @@ Every one of these merged or compiled cleanly on past upstream catch-ups but sil
        > "$OUT/$label.json" 2> "$OUT/$label.log"
    done
    ```
-4. **Affected features only** (each requires user OK):
+4. **Affected features only**:
    - AllReduce / TP touched: `"$CAND/bin/vr-test-gfx906-tp" --n 1 --check && "$CAND/bin/vr-test-gfx906-tp" --n 2048 --check` (both must report `check=pass`).
    - Numerics / sampling touched: `llama-completion --temp 0 --top-k 1 -s 42 -n 32 -no-cnv --simple-io --no-display-prompt`.
    - Flash attention, KV cache, ubatch splitting, or server slots touched: [scripts/bench_multiuser.sh](scripts/bench_multiuser.sh) (`4x16K` unified KV + 4-way TG; `REPS=2` if within 3%). Reference 2026-11-15 baselines (`kv_rows` on vs off):
      - 27B Q8_0: **577.8 / 577.5 PP**, **80.86 / 80.93 4-way TG** (off: 462.3 PP, 81.1 TG). Drop toward 462 PP means `kv_rows` stopped engaging.
      - Flash Next UD-IQ3_XXS: **470.5 / 473.1 PP**, **84.17 / 83.90 4-way TG** (off: 472.2 PP, 84.2 TG).
    - MoE / speculative / Inkling touched: `test-backend-ops`, `vr-test-flashnext-moe`, [scripts/spec_accept.sh](scripts/spec_accept.sh), or targeted model KLD.
-5. **Handoff & promotion**: Leave uncommitted for human review. Once accepted and committed by the human, update symlinks (`ln -sfn "$BASE" build-previous && ln -sfn "$CAND" build-current`) without renaming build directories.
+5. **Promotion**: Once validated and committed, update symlinks (`ln -sfn "$BASE" build-previous && ln -sfn "$CAND" build-current`) without renaming build directories.
 
 ## How to add a fused op
 

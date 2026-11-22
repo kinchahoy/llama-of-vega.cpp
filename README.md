@@ -1,105 +1,79 @@
-This fork retains gfx906 inference improvements for MI50/MI60 GPUs. See the [gfx906 guide](vr/README.md) for setup, measurements, and updating from upstream.
+# llama.cpp (gfx906 MI50 / MI60 Performance Fork)
 
-# llama.cpp
+**Status datestamp: 2026-11-22** | Upstream base: [`ggml-org/llama.cpp` `e6d624b9a` (`b12623`)](https://github.com/ggml-org/llama.cpp/commit/e6d624b9a)
 
-![llama.cpp](https://raw.githubusercontent.com/ggml-org/llama-brand/refs/heads/master/logo/svg/cover/llama-cpp/cover-llama-cpp-dark.svg)
+A community fork of [llama.cpp](https://github.com/ggml-org/llama.cpp) tuned for long-context (50-100K+ token), 1-4 parallel slot agentic inference on legacy AMD **gfx906** GPUs (**Radeon Instinct MI60 / MI50**, 32 GiB HBM2 each, no matrix units / MFMA).
 
-<div align="center">
+It is not affiliated with or endorsed by the upstream llama.cpp project. The full upstream README is preserved in [README.llama.cpp.md](README.llama.cpp.md).
 
-<b>LLM inference in C/C++</b>
+## Design goals & quality focus
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Release](https://img.shields.io/github/v/release/ggml-org/llama.cpp?color=brightgreen)](https://github.com/ggml-org/llama.cpp/releases?q=tag:v1)
-[![Nightly](https://img.shields.io/github/v/release/ggml-org/llama.cpp?label=nightly&filter=b*&color=orange)](https://github.com/ggml-org/llama.cpp/releases?q=b)
-[![Server](https://img.shields.io/github/actions/workflow/status/ggml-org/llama.cpp/server.yml?label=Server)](https://github.com/ggml-org/llama.cpp/actions/workflows/server.yml)
-[![Docker](https://img.shields.io/github/actions/workflow/status/ggml-org/llama.cpp/docker.yml?label=Docker)](https://github.com/ggml-org/llama.cpp/actions/workflows/docker.yml)
-[![Winget](https://img.shields.io/github/actions/workflow/status/ggml-org/llama.cpp/winget.yml?label=Winget)](https://github.com/ggml-org/llama.cpp/actions/workflows/winget.yml)
+- **Target workload**: Long-context agentic inference (**50-100K+ tokens**, where both prompt processing and token generation matter) across **1-4 parallel slots** on legacy 32 GiB AMD gfx906 hardware.
+- **Approach**: Prioritize reusable, model-independent kernel and architecture wins (attention, GDN/SSM, MoE, repacked mat-vec/GEMM, multi-slot scaling) over fragile parameter tuning, with a secondary goal of keeping custom code maintainable for upstream catch-up merges and eventual upstreaming.
+- **Quality & accuracy first**:
+  - **No KV cache quantization**: All benchmarks and presets keep **F16 KV cache** by default.
+  - **Full model fidelity**: No lossy expert dropping or approximation hacks; speculative decoding (MTP / DFlash / DSpark) preserves exact target-model output.
+  - **Verification**: Kernel changes are checked with CPU-reference unit tests (`test-backend-ops`) and logit-level KL-divergence (`llama-perplexity --kl-divergence`), not just greedy text smoke tests.
 
-[v1.0.0](https://huggingface.co/blog/ggml-org/llama-cpp-v1) / [ggml](https://github.com/ggml-org/ggml) / [ops](https://github.com/ggml-org/llama.cpp/blob/master/docs/ops.md) / [maintainer PRs](https://github.com/ggml-org/llama.cpp/pulls?q=is%3Apr%20is%3Aopen%20draft%3AFalse%20(author%3Asanmai%20OR%20author%3Argerganov%20OR%20author%3AKitaitiMakoto%20OR%20author%3Adanbev%20OR%20author%3Aaldehir%20OR%20author%3Amax-krasnyansky%20OR%20author%3ACISC%20OR%20author%3Aggerganov%20OR%20author%3Aam17an%20OR%20author%3Ajhen0409%20OR%20author%3Abartowski1182%20OR%20author%3Anikwen%20OR%20author%3Ahipudding%20OR%20author%3Aravi9%20OR%20author%3AServeurpersoCom%20OR%20author%3Athelittlefireman%20OR%20author%3Apwilkin%20OR%20author%3Areeselevine%20OR%20author%3Angxson%20OR%20author%3Ajeffbolznv%20OR%20author%3Amarty1885%20OR%20author%3A0cc4m%20OR%20author%3ATitaniumtown%20OR%20author%3Aangt%20OR%20author%3AIMbackK%20OR%20author%3Aarthw%20OR%20author%3AJohannesGaessler%20OR%20author%3AORippler%20OR%20author%3Aruixiang63%20OR%20author%3Axctan%20OR%20author%3AmasterFoad%20OR%20author%3Aallozaur%20OR%20author%3AAndreas-Krebbel%20OR%20author%3Ayomaytk%20OR%20author%3Aaendk%20OR%20author%3Awine99%20OR%20author%3Agaugarg-nv%20OR%20author%3Ataronaeo%20OR%20author%3Aforforever73%20OR%20author%3Achaxu01%20OR%20author%3Alhez%20OR%20author%3AAlekseiNikiforovIBM%20OR%20author%3Anetrunnereve%20OR%20author%3Afairydreaming%20OR%20author%3Aynankani)%20sort%3Aupdated-desc) / [dev stats](https://github.com/ggml-org/llama.cpp-dev) / [lib llama API](https://github.com/ggml-org/llama.cpp/issues/9289) / [llama-server REST API](https://github.com/ggml-org/llama.cpp/issues/9291)
+## Current state & performance (2026-11-22)
 
-</div>
+Measured on **2x gfx906 (MI60 + MI50)**, TheRock ROCm, F16 KV cache (no KV quantization), `-fa on`, cool-start alternated ABBA runs (`llama-bench` / `llama-batched-bench`):
 
-## Description
+| Model | Hardware & Mode | PP2048 | TG128 / Serving | Notes |
+| --- | --- | ---: | ---: | --- |
+| **Qwen3.8-27B Q8_0** | 2 GPUs, `-sm tensor`, `ub 512` (`ub 2048`) | **614.0** (~697) | **37.96** plain | ~+53% PP / +14% TG vs upstream; MTP2 ~62-65 t/s; DFlash5 ~69-71 t/s (short prompt); 4x16K unified KV (`kv_rows`): **577.8 PP (+25%) / 80.9 4-way TG** |
+| **Qwen3.8 Flash Next UD-IQ3_XXS** | 2 GPUs, `-sm tensor`, `ub 512` | **651.0** | **50.46** plain | >+100% PP / ~+29% TG vs upstream; MTP3 @ 100K ctx (Q8_0 sidecar on ROCm1): **62.7 t/s** |
+| **Inkling 2 Mini NVFP4 + Q8_0** | 1 GPU (MI60), `ub 512` (`ub 2048`) | **835.7** (1081) | **46.97** plain | +70% PP / +54% TG over initial merge; 4K/16K ctx TG: **43.12 / 40.53 t/s** (`flash_attn_ext_vec` `(128,4)` fix) |
+| **Inkling 2 Mini IQ4_NL** | 1 GPU (MI60), `ub 512` | **878.6** | **48.98** plain | +56% PP / +35% TG over initial merge |
 
-The main goal of `llama.cpp` is to enable LLM (and MLLM) inference with minimal setup and state-of-the-art performance on a wide range of hardware - locally and in the cloud.
+### Key additions over upstream `e6d624b9a`
 
-The `llama.cpp` project is built on top of the [ggml](https://github.com/ggml-org/ggml) library.
+- **gfx906 repacked weight path (`ggml/src/ggml-cuda/q8_repack/`)**: 10 weight formats (`Q8_0`, `MXFP4`, `IQ4_NL`, `IQ4_XS`, `NVFP4`, `Q5_0`, `Q5_1`, `Q4_K`, `Q5_K`, `Q6_K`) tuned for GCN `v_dot4` without MFMA, plus narrow multi-column decode/verify mat-vec and fused gate+up+SwiGLU.
+- **Host-staged duplex & slab-overlapped AllReduce (`ggml/src/ggml-cuda/allreduce.cu`)**: Default HIP tensor-parallel path for PCIe boards without P2P/RCCL (`-DGGML_HIP_RCCL=OFF`), plus whole-token HIP graph replay and parallel lane dispatch.
+- **Unified-KV `kv_rows` tile FlashAttention on gfx906** (+25% 4x16K PP) and HIP `(128, 4)` occupancy launch bounds on `flash_attn_ext_vec` (+13-21% decode TG at 4K-16K).
+- **Fused GCN kernels & MoE speedups**: `DSV4_HC_MIX` (F2), small-M tiled split-K F32 GEMM (P4), word-op IQ sign handling (S2), one-wave `topk_moe_wave_cuda<512, 10>` (B1), grouped MoE verify (`flashnext-moe.cuh`), two-launch wide reductions (`add_rms_norm_mul`, `res_mix`), Inkling 2 fused ops (`CLIP_ROWS`, `RES_MIX`, `LOOP_GATE`, `RMS_NORM_CAT`, `SCONV_RES`) and tile-kernel banded prefill attention.
+- **Speculative decoding & rollback**: Multi-slot recurrent state rollback (`snapshot_ring`), single-GPU DFlash/MTP sidecar support, and opt-in Inkling 2 DSpark port (upstream PR `#32218`; currently slower than plain decode on gfx906, off by default).
 
-## Quick start
+### Known caveats (2026-11-22)
 
-A few options to get `llama.cpp` installed on your machine:
+- Tested primarily on **gfx906 (MI50 / MI60)** with TheRock ROCm (`-DGGML_HIP_RCCL=OFF`). Wave32/NVIDIA/RDNA guards are in place for `DSV4_HC_MIX`, and `SGEMM_F32` is gated to GCN, but non-gfx906 targets are not regularly benchmarked here.
+- **Open high-leverage gaps** tracked in [vr/PERFORMANCE.md](vr/PERFORMANCE.md): long-context QSA tile skipping & 6:1 GQA head grouping (`G1`) at 32K-100K, the `>8` token cliff for 4-slot + speculative verify (`MU1(b)`), Inkling PP4K+ SWA ring-wrap fallback & `flash_attn_tile<128,128,64>` register spill, and Q8-reference KLD check for `SGEMM_F32` (`P4`).
+
+## Build & documentation
 
 ```bash
-# curl
-curl -LsSf https://llama.app/install.sh | sh
-
-# powershell
-irm https://llama.app/install.ps1 | iex
+# Source your ROCm / TheRock environment first if needed
+cmake -S . -B build-gfx906 \
+  -DGGML_HIP=ON -DGGML_HIP_GRAPHS=ON -DGGML_HIP_RCCL=OFF \
+  -DGGML_HIP_NO_VMM=ON -DGGML_HIP_MMQ_MFMA=ON \
+  -DLLAMA_OPENSSL=ON -DLLAMA_BUILD_VR_EXPERIMENTS=ON \
+  -DAMDGPU_TARGETS=gfx906 -DCMAKE_BUILD_TYPE=Release \
+  -DHIP_COMPILER=clang -DCMAKE_PREFIX_PATH="$(rocm-sdk path --cmake)" \
+  -DCMAKE_HIP_FLAGS="-mllvm -amdgpu-sched-strategy=max-ilp" \
+  -DCMAKE_CXX_FLAGS="-O3 -Wno-unused-command-line-argument"
+cmake --build build-gfx906 --target llama-cli llama-server llama-bench llama-batched-bench vr-test-gfx906-tp vr-test-flashnext-moe -j 8
 ```
 
-- Visit https://llama.app and follow the instructions
-- Run with Docker - see our [Docker documentation](docs/docker.md)
-- Download pre-built binaries from the [releases page](https://github.com/ggml-org/llama.cpp/releases)
-- Build from source by cloning this repository - check out [our build guide](docs/build.md)
+Detailed fork docs live under `vr/`:
+- [vr/README.md](vr/README.md) - quickstart, run commands, and directory index
+- [vr/GOALS.md](vr/GOALS.md) - target workload, priorities, and accuracy posture
+- [vr/HARDWARE.md](vr/HARDWARE.md) - calibrated gfx906 constants (occupancy, streaming, cross-GPU exchange)
+- [vr/PERFORMANCE.md](vr/PERFORMANCE.md) - live baselines, audit findings, testing rules, and worklist
+- [vr/BENCHMARK-TIMELINE.md](vr/BENCHMARK-TIMELINE.md) - full dated benchmark timeline (2026-08-12 to present)
+- [vr/MAINTENANCE.md](vr/MAINTENANCE.md) - fork feature delta, repack layout, silent merge traps, and upstream catch-up guide
 
-Once installed:
+## Credits & prior art
 
-```sh
-# Download and run a model directly from Hugging Face
-llama cli -hf ggml-org/Qwen3.5-0.8B-GGUF
+This fork builds directly on upstream `llama.cpp` and borrows ideas, reference implementations, or benchmarks from the wider open-source inference community:
 
-# Launch OpenAI-compatible API server
-llama serve -hf ggml-org/Qwen3.5-0.8B-GGUF
-```
+- **[ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp)** - upstream inference engine, HIP/CUDA backends, GDN/FlashAttention/speculative infrastructure, and PR `#32218` (DSpark).
+- **[unslothai/llama.cpp](https://github.com/unslothai/llama.cpp)** - PR `#264` (device counting sort for MoE IDs), PR `#386` (Inkling 2 banded relative-bias attention interface), and dynamic GGUF quantizations.
+- **[mixa3607/mx-llama.cpp](https://github.com/mixa3607/mx-llama.cpp)** & **[mixa3607/ML-gfx906](https://github.com/mixa3607/ML-gfx906)** - gfx906 tensor-parallelism, whole-token HIP graph replay, weight-repack lineage, and `-mllvm -amdgpu-sched-strategy=max-ilp` toolchain tuning.
+- **[iacopPBK/llama.cpp-gfx906](https://github.com/iacopPBK/llama.cpp-gfx906)** - early `q8_repack` gfx906 kernel lineage.
+- **[Niko1221/Strata](https://github.com/Niko1221/Strata)** - gfx906 IQ sign-handling word-op ideas (`S2`) and MoE roofline observations.
+- **[thejacer/slop.cpp](https://github.com/thejacer/slop.cpp)** - Inkling 2 Mini gfx906 tensor parallelism, load-time weight folding, fused ops, and async input-upload ring ideas.
+- **[alex4300/llama.cpp-gfx906-opt](https://github.com/alex4300/llama.cpp-gfx906-opt)** & **[milpster/gfx906-llama-cpp](https://github.com/milpster/gfx906-llama-cpp)** - gfx906 multi-column LDS-staged GEMV, GCN `DKQ=256` FlashAttention tuning, and Vega 20 MMQ/word-op ideas.
 
-<table align="center">
-    <tr>
-        <td align="center" width=50%>
-            <img width="1310" height="888" alt="VLM session with `llama cli`" src="https://github.com/user-attachments/assets/88726b48-1713-48aa-a525-95a02e78afc4" />
-            <i>VLM session with <b>llama cli</b></i>
-        </td>
-        <td align="center">
-            <img width="1392" height="958" alt="Llama Chat, the built-in chat app, against `llama serve` running Qwen 3.6" src="https://github.com/user-attachments/assets/b402f972-2e32-4def-8771-8d849f08cf2e" />
-            <i>Llama Chat, the built-in chat app, against <b>llama serve</b></i>
-        </td>
-    </tr>
-<table>
+---
 
-## Documentation
-
-#### Tools
-
-- [cli](tools/cli/README.md)
-- [completion](tools/completion/README.md)
-- [server](tools/server/README.md)
-- [Text-to-speech (TTS) models](docs/multimodal/tts.md)
-- [GBNF grammars](grammars/README.md)
-
-#### Development
-
-- [How to build](docs/build.md)
-- [Running on Docker](docs/docker.md)
-- [Build on Android](docs/android.md)
-- [Multi-GPU usage](docs/multi-gpu.md)
-- [Performance troubleshooting](docs/development/token_generation_performance_tips.md)
-- [GGML tips & tricks](https://github.com/ggml-org/llama.cpp/wiki/GGML-Tips-&-Tricks)
-- [XCFramework](docs/xcframework.md)
-- [Completions](docs/completions.md)
-- [Models](docs/models.md)
-- [Release process](docs/release.md)
-
-## Contributing
-
-- Contributors can open PRs
-- Collaborators will be invited based on contributions
-- Maintainers can push to branches in the `llama.cpp` repo and merge PRs into the `master` branch
-- Any help with managing issues, PRs and projects is very appreciated!
-- Read the [CONTRIBUTING.md](CONTRIBUTING.md) for more information
-
-## Acknowledgements
-
-- [yhirose/cpp-httplib](https://github.com/yhirose/cpp-httplib) - Single-header HTTP server, used by `llama-server` - MIT license
-- [nothings/stb](https://github.com/nothings/stb) - Single-header image format decoder, used by multimodal subsystem - Public domain
-- [nlohmann/json](https://github.com/nlohmann/json) - Single-header JSON library, used by various tools/examples - MIT License
-- [mackron/miniaudio](https://github.com/mackron/miniaudio) - Single-header audio format decoder, used by multimodal subsystem - Public domain
-- [sheredom/subprocess.h](https://github.com/sheredom/subprocess.h) - Single-header process launching solution for C and C++ - Public domain
+For full upstream documentation, build options, supported models, and license information, see **[README.llama.cpp.md](README.llama.cpp.md)** (and [LICENSE](LICENSE), MIT).

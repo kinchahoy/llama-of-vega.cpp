@@ -2,6 +2,7 @@
 # usage: spec_accept.sh NAME BUILD_DIR OUT_DIR q27|fn [ENV=VAL ...]
 # Speculative A/B with acceptance: llama-server, 5 prompts (code and prose), 256 greedy tokens each.
 # q27 = 27B Q8_0 MTP2; fn = Flash Next UD-IQ3_XXS MTP3, Q8_0 sidecar, 100K ctx (TS and DEVD env override the split and draft device).
+# Env overrides: THEROCK_ENV, HF_HUB_CACHE, MODELS_DIR, M27, FN, DQ8, PORT.
 set -u
 NAME=$1; BUILD=$2; OUT=$3; MODEL=$4; shift 4
 HERE=$(cd "$(dirname "$0")" && pwd); REPO=$(cd "$HERE/../.." && pwd)
@@ -11,14 +12,20 @@ head -c 6000 "$REPO/src/llama-context.cpp" > "$OUT/prompts/p2.txt"
 head -c 4000 "$REPO/tools/server/README.md" > "$OUT/prompts/p3.txt"
 printf 'Write a detailed history of the printing press, covering Gutenberg, the spread across Europe, and its social effects.' > "$OUT/prompts/p4.txt"
 printf 'Write a Python function that parses an ISO 8601 duration string like P3DT4H5M into seconds, with tests.' > "$OUT/prompts/p5.txt"
-source $THEROCK_ENV
+THEROCK_ENV=${THEROCK_ENV:-}
+if [ -n "$THEROCK_ENV" ] && [ -f "$THEROCK_ENV" ]; then
+  source "$THEROCK_ENV"
+elif [ -f "$REPO/vr/server/env.local.sh" ]; then
+  source "$REPO/vr/server/env.local.sh"
+fi
 set +e +u
 unset GGML_CUDA_PEER_AR GGML_CUDA_TP_OVERLAP GGML_CUDA_FLASHNEXT_MOE
 for kv in "$@"; do export "$kv"; done
-HF=$HF_HUB_CACHE
-M27=$HF/models--unsloth--Qwen3.8-27B-GGUF/snapshots/4ca720788d1e01f1bff70c033e0d0028fd02e502/Qwen3.8-27B-Q8_0.gguf
-FN=$MODELS_DIR/flashnext/UD-IQ3_XXS/Qwen3.8-Flash-Next-UD-IQ3_XXS-00001-of-00004.gguf
-DQ8=$HF/models--unsloth--Qwen3.8-Flash-Next-GGUF/snapshots/d96201194f103c906994f283f504209dc8d2a10c/mtp-Qwen3.8-Flash-Next-Q8_0.gguf
+HF=${HF_HUB_CACHE:-$HOME/.cache/huggingface/hub}
+MODELS_DIR=${MODELS_DIR:-$HOME/models}
+M27=${M27:-$HF/models--unsloth--Qwen3.8-27B-GGUF/snapshots/4ca720788d1e01f1bff70c033e0d0028fd02e502/Qwen3.8-27B-Q8_0.gguf}
+FN=${FN:-$MODELS_DIR/flashnext/UD-IQ3_XXS/Qwen3.8-Flash-Next-UD-IQ3_XXS-00001-of-00004.gguf}
+DQ8=${DQ8:-$HF/models--unsloth--Qwen3.8-Flash-Next-GGUF/snapshots/d96201194f103c906994f283f504209dc8d2a10c/mtp-Qwen3.8-Flash-Next-Q8_0.gguf}
 if [ "$MODEL" = q27 ]; then
   A="-m $M27 -ngl 999 -dev ROCm0,ROCm1 -sm tensor -fa on -b 2048 -ub 2048 -c 16384 -t 20 --spec-type draft-mtp --spec-draft-n-max 2 --spec-draft-backend-sampling"
 else

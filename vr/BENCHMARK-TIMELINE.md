@@ -1,8 +1,8 @@
 # gfx906 Benchmark Timeline (2026-08-12 to 2026-11-22)
 
-Single lossless, append-only historical benchmark record for `llama.cpp-gfx906` on two 32 GiB AMD gfx906 GPUs. Consolidates all historical benchmark data, profiles, microbenchmarks, multi-user serving sweeps, quality/KLD checks, and optimization wins previously spread across `vr/PERFORMANCE-RECORDS.md`, `vr/TOKEN-BUDGET.md`, `vr/old-ignore/`, and `vr/investigation-notes/`.
+Single lossless, append-only historical benchmark record for this gfx906 `llama.cpp` fork on two 32 GiB AMD gfx906 GPUs. Consolidates all historical benchmark data, profiles, microbenchmarks, multi-user serving sweeps, quality/KLD checks, and optimization wins.
 
-Live current numbers and active worklist stay in [PERFORMANCE.md](PERFORMANCE.md). Measured hardware constants stay in [HARDWARE-CARD.md](HARDWARE.md).
+Live current numbers and active worklist stay in [PERFORMANCE.md](PERFORMANCE.md). Measured hardware constants stay in [HARDWARE.md](HARDWARE.md).
 
 ## Standard Hardware, Build, and Test Baseline
 
@@ -10,10 +10,10 @@ Live current numbers and active worklist stay in [PERFORMANCE.md](PERFORMANCE.md
 
 | Component | Details |
 | --- | --- |
-| ROCm0 (`03:00.0`) | AMD Radeon Instinct MI60 32 GiB (gfx906), 64 CUs, VBIOS `113-D1630600-107`, power cap 210 W (max 225 W), CPU root port PCIe Gen3 x8 |
-| ROCm1 (`87:00.0`) | AMD MI50 32 GiB (gfx906) with Radeon Pro VII VBIOS `113-D1640200-043` (DP outputs), 60 CUs, power cap 170 W (max 178 W), PCH root port PCIe Gen4 x4 behind DMI |
+| ROCm0 | AMD Radeon Instinct MI60 32 GiB (gfx906), 64 CUs, power cap 210 W (max 225 W), CPU root port PCIe Gen3 x8 |
+| ROCm1 | AMD MI50 32 GiB (gfx906, Radeon Pro VII VBIOS), 60 CUs, power cap 170 W (max 178 W), PCH root port PCIe Gen4 x4 behind DMI |
 | Interconnect | No direct P2P (`hipDeviceCanAccessPeer=0`); host-staged pinned AllReduce ~7 GB/s per direction per GPU (3.46 GB/s duplex) |
-| Host CPU & RAM | 20 threads (CPUs 0-7 P-cores, CPUs 8-19 E-cores), 91-96 GiB RAM |
+| Host CPU & RAM | 20 threads (hybrid P/E cores), 96 GiB RAM |
 | Toolchain | TheRock ROCm (`rocm-sdk`), 10.2.0a20261012 (clang `6da73151`) through 2026-11-05, 10.3.0a20261105 (clang `36c1564f` / Clang 24.0.0) from 2026-11-06 onward |
 
 ### Standard Build and Run Settings
@@ -22,7 +22,7 @@ Live current numbers and active worklist stay in [PERFORMANCE.md](PERFORMANCE.md
   `-DGGML_HIP=ON -DGGML_HIP_GRAPHS=ON -DGGML_HIP_RCCL=OFF -DGGML_HIP_NO_VMM=ON -DGGML_HIP_MMQ_MFMA=ON -DLLAMA_OPENSSL=ON -DAMDGPU_TARGETS=gfx906 -DCMAKE_BUILD_TYPE=Release -DHIP_COMPILER=clang -DCMAKE_HIP_FLAGS="-mllvm -amdgpu-sched-strategy=max-ilp" -DCMAKE_CXX_FLAGS="-O3 -Wno-unused-command-line-argument"`
 - Standard 2-GPU TP settings (records note only what differs): both GPUs (`-dev ROCm0/ROCm1`), `-ngl 999 -sm tensor -ts 1/1 -fa on`, no env knobs.
 - **Qwen3.8-27B Q8_0**: `-b 2048 -ub 2048 -t 20` (`-ub 512` in 2026-11-21/22 cross-model screens), F16 KV, `llama-bench` PP2048/TG128.
-- **Qwen3.8 Flash Next UD-IQ3_XXS**: `-b 1024 -ub 512`, F16 KV (user rule 2026-11-06: do not quantize KV cache; records before 2026-11-06 and the 2026-11-06 8K rows used Q8_0 KV).
+- **Qwen3.8 Flash Next UD-IQ3_XXS**: `-b 1024 -ub 512`, F16 KV (policy since 2026-11-06: F16 KV cache only; records before 2026-11-06 and the 2026-11-06 8K rows used Q8_0 KV).
 - **Inkling 2 Mini**: single GPU ROCm0 (`-dev ROCm0`), `-ub 512` (or `-ub 2048` where noted), F16 KV.
 - **Evidence grades**:
   - **A**: alternated (e.g. A/B/B/A) or repeated A/B on the real model, cooled below 60C (50C on 2026-11-22), with numbers.
@@ -45,7 +45,7 @@ Purpose in one sentence. Kind: regression screen | A/B experiment | profile.
 - Workload: standard, or what differs; repeats and order (e.g. r3 alternating, below 50C).
 - Predicted (from the card): predicted saving in ms per token with arithmetic.
 - Measured: measured saving per kernel (trace) and end to end, with grade.
-- Prediction error and card update: error in percent; "none" if inside ~20%; otherwise constant updated in HARDWARE-CARD.md.
+- Prediction error and card update: error in percent; "none" if inside ~20%; otherwise constant updated in HARDWARE.md.
 
 | Build | Mode | PP t/s | TG t/s | Change | Accept | Output |
 | --- | --- | ---: | ---: | ---: | ---: | --- |
@@ -86,10 +86,10 @@ Compiled from `vr/investigation-notes/2026-11-22-process-retro/history-retro.md`
 | W19 | L-GM grouped MoE for 2-8 token verify (default on) | Flash Next | 2026-11-06 (exp 2026-10-25) | `298882544` | Oct 25 MTP2 47.65 -> 50.45 (+5.9% TG); Nov 6 100K MTP2 48.9 -> 51.8, MTP3 49.1 -> 52.8, byte-identical (B) | unknown | Decode each IQ2_S/IQ4_NL expert weight once for up to 8 verify tokens |
 | W20 | S2 cheaper IQ sign apply (`iq_apply_signs`) | Flash Next | 2026-11-06 | `1785a4513` | r5 alternating: PP 541.45 -> 557.97 (+3.05%), TG 41.17 -> 43.27 (+5.11%), bit-exact (A) | fork-port (Strata idea) | `(g ^ m) + (m & 0x01010101)` replaces emulated `__vcmpne4`/`__vsub4` |
 | W21 | L-RPK repack Q5_0 (native) and IQ4_XS (via IQ4_NL) | Flash Next (big quants) | 2026-11-06 | `ebd76ced1`, `3e19b6adc` | UD-Q3_K_XL @8K +2.3% TG (~+6% PP); UD-IQ4_XS `-ncmoe 3` +9% PP / +3.5% TG; PPL unchanged (B) | unknown | Map Q5_0/IQ4_XS onto repacked kernels |
-| W22 | F2 fused hyper-connection mix op (`GGML_OP_DSV4_HC_MIX`) | Flash Next | 2026-11-06 | `0920eb0ac` | TG128 @8K 40.8 -> 46.0 (+12%); MTP3 100K step 52.18 -> 49.48 ms (-5.2%), TG 59.4 -> 62.7; KLD 4.4e-3 (B) | profile (Fable review) | 7 launches -> 3 per HC mix for 1-8 tokens |
-| W23 | P4 tiled split-K F32 GEMM for small-M (`hc_*`, `ssm_alpha/beta`) | Flash Next | 2026-11-06 | `52bcba210`, `9fb19f750`, `da11f5b99` | PP2048 @8K 508.9 -> 563.8 (+11%), PP512 +12%, TG unchanged; KLD 4.7-5.1e-3 (B) | profile (Fable review) | Replaces slow rocBLAS SGEMM on small-M GCN shapes |
-| W24 | K1 one `set_rows` for recurrent conv snapshots + vector F32 `set_rows` | 27B | 2026-11-06 | `cadb56aa2` | 27B MTP2 spec_accept 40.38 -> 38.95 ms/step (-3.5%), mean TG 62.4 -> 64.7, same acceptance 0.777 (B) | profile (Fable round 2) | One permuted view store instead of 3 per layer + float4 `set_rows` |
-| W25 | B1 one-wave MoE routing kernel `topk_moe_wave_cuda<512,10>` + HIP ballot fix | Flash Next | 2026-11-10 | `6d8f0c1c7`, `457d4470b` | 28.8 -> 14.9 us/call; TG128 @8K 45.71 -> 47.53 (+4.0%, 4x r5 alternating, bit-exact, A) | profile (Fable round 2) | One wave per row, rolled k-loop, DPP min-reduce |
+| W22 | F2 fused hyper-connection mix op (`GGML_OP_DSV4_HC_MIX`) | Flash Next | 2026-11-06 | `0920eb0ac` | TG128 @8K 40.8 -> 46.0 (+12%); MTP3 100K step 52.18 -> 49.48 ms (-5.2%), TG 59.4 -> 62.7; KLD 4.4e-3 (B) | profile review | 7 launches -> 3 per HC mix for 1-8 tokens |
+| W23 | P4 tiled split-K F32 GEMM for small-M (`hc_*`, `ssm_alpha/beta`) | Flash Next | 2026-11-06 | `52bcba210`, `9fb19f750`, `da11f5b99` | PP2048 @8K 508.9 -> 563.8 (+11%), PP512 +12%, TG unchanged; KLD 4.7-5.1e-3 (B) | profile review | Replaces slow rocBLAS SGEMM on small-M GCN shapes |
+| W24 | K1 one `set_rows` for recurrent conv snapshots + vector F32 `set_rows` | 27B | 2026-11-06 | `cadb56aa2` | 27B MTP2 spec_accept 40.38 -> 38.95 ms/step (-3.5%), mean TG 62.4 -> 64.7, same acceptance 0.777 (B) | profile review (round 2) | One permuted view store instead of 3 per layer + float4 `set_rows` |
+| W25 | B1 one-wave MoE routing kernel `topk_moe_wave_cuda<512,10>` + HIP ballot fix | Flash Next | 2026-11-10 | `6d8f0c1c7`, `457d4470b` | 28.8 -> 14.9 us/call; TG128 @8K 45.71 -> 47.53 (+4.0%, 4x r5 alternating, bit-exact, A) | profile review (round 2) | One wave per row, rolled k-loop, DPP min-reduce |
 | W26 | Multi-slot MTP rollback for Flash Next (remove `n_rs_seq=0` clamp) | Flash Next | 2026-11-11 | `fbc067862` | 2 slots 1 user TG 32.5 -> 69.1 / 67.2 (+110%), ms/step 82.9 -> 44.3 / 45.7 (B) | differential | Uses plane-indexed snapshot path instead of full-state checkpoints; `seq_cp`/`find_slot` fixes |
 | W27 | `kv_rows` flash attention on gfx906 tile kernel + sequential rollback split | 27B, FN | 2026-11-15 | `80212cad5`, `7ddd49693`, `3bd5e1909` | 27B 4x16K PP 462.3 -> 577.8 (+25.0%), 4-way TG neutral, single-user neutral (-0.4%/0.0%); FN neutral (A) | upstream-port (#29510) | Separate `use_kv_rows` tile kernels keep plain path spill-free; `get_n_kv_rows` work gate |
 | W28 | U1 / R-CU1 device MoE id counting sort (unsloth #264) | Flash Next | 2026-11-21 | `175153274`, `400989a0d` | PP2048 @`-ub 2048` 877.4 -> 895.5 (+2.1%), @`-ub 512` 0.0% (inside noise, B) | fork-port (unsloth #264) | Device-side counting sort for >= 512 tokens; OOB id guard for meta expert slices |
@@ -599,7 +599,7 @@ Builds: `build-exp-q3` (`246887e7bebf / d67316b02bbe`) for 27B@0 TG; `build-exp-
 
 1. **Decode (TG) unprofiled + profiled critical-path breakdown (ms/token)**:
 
-| Metric / Step | 27B@0 (16:46 PST) | 27B@32K (17:50 PST) | FN@8K (17:48 PST) | G4@0 (18:28 PST) | FN@32K (18:48 PST) | 27B 1-GPU@0 (18:48 PST) |
+| Metric / Step | 27B@0 | 27B@32K | FN@8K | G4@0 | FN@32K | 27B 1-GPU@0 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Model & settings | 27B Q8_0 `4ca72078`, 2048/2048, tg64 | 27B Q8_0, d32K, tg32 | FN IQ3_XXS `d9620119`+Q8 tbl, 1024/512, d8K, tg64 | Gemma 4 31B Q8_0 `c1ac76e9`, 2048/2048, tg64 | FN IQ3_XXS, d32K, tg64 | 27B Q8_0 ROCm0 only, 2048/2048, tg64 |
 | **Unprofiled TG t/s (ms/tok)** | **37.45 +- 0.21 (26.70)** | **33.48 +- 0.97 (29.87)** | **43.68 +- 0.60 (22.90)** | **32.68 +- 0.15 (30.60)** | **41.32 +- 0.97 (24.20)** | **23.42 +- 0.01 (42.70)** |
@@ -637,7 +637,7 @@ Builds: `build-exp-q3` (`246887e7bebf / d67316b02bbe`) for 27B@0 TG; `build-exp-
 
 2. **Prefill (PP) unprofiled + profiled critical-path breakdown (ms per 1K prompt tokens)**:
 
-| Metric / Step | 27B@0 (19:28 PST) | 27B@32K (19:33 PST) | FN@0 (19:29 PST) | G4@0 (19:30 PST) | FN@32K (19:36 PST) |
+| Metric / Step | 27B@0 | 27B@32K | FN@0 | G4@0 | FN@32K |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | **Unprofiled PP2048 t/s (ms/1K)** | **705.3 +- 1.4 (1417.8)** | **457.8 +- 4.2 (2184.4)** | **591.4 +- 11.9 (1690.9)** | **602.5 +- 1.4 (1659.9)** | **441.6 +- 4.3 (2264.6)** |
 | Profiled ms/1K (all / traced / t/s) | 1421.4 / 1406.5 / 703.5 | 2280.9 / 2194.2 / 438.4 | 1660.3 / 1608.9 / 602.3 | 1668.1 / 1646.5 / 599.5 | 2315.7 / 2256.9 / 431.8 |
@@ -731,13 +731,13 @@ Standalone `mvbench.hip` (16 layers = 3.24 GB, 108 mat-vecs, 5 passes) on `0f7ce
 
 ### 2026-11-06 K1: Single `set_rows` for recurrent conv snapshots + vector F32 `set_rows`
 
-- Source: `cadb56aa2` (landed from Fable round 2 review). Switches: `GGML_K1_STATE_STORE=0`, `GGML_K1_SET_ROWS_VEC=0`.
-- Mechanism: one permuted view `set_rows` instead of 3 conv snapshot stores per layer, removes redundant `cont` before SSM snapshot store, adds `float4` vector F32 `set_rows` (K/V cache writes were already fused into `ROPE+VIEW+SET_ROWS`; the 193 `k_set_rows`/token in the Fable profile were recurrent snapshots).
+- Source: `cadb56aa2` (landed from round 2 profile review). Switches: `GGML_K1_STATE_STORE=0`, `GGML_K1_SET_ROWS_VEC=0`.
+- Mechanism: one permuted view `set_rows` instead of 3 conv snapshot stores per layer, removes redundant `cont` before SSM snapshot store, adds `float4` vector F32 `set_rows` (K/V cache writes were already fused into `ROPE+VIEW+SET_ROWS`; the 193 `k_set_rows`/token in the profile were recurrent snapshots).
 - Result (27B Q8_0 MTP2, 5-prompt `spec_accept.sh`, one pass each way, Grade B): step time **40.38 -> 38.95 ms/step (-3.5%)**, mean TG **62.4 -> 64.7 t/s**, same acceptance **0.777**, replies byte-identical. TP check pass at n=1/2048; `SET_ROWS` tests pass. Flash Next not separately measured.
 
 ### 2026-11-06 F2, P4, ROCm toolchain A/B, and acceptance-aware speculative runs
 
-Lands first two Fable-review kernels (F2 fused hyper-connection mix `0920eb0ac`, P4 tiled split-K small-M F32 GEMM `52bcba210`, dispatch guards `9fb19f750`/`da11f5b99`), checks suspected 27B MTP2 toolchain regression, and establishes 5-prompt `spec_accept.sh` ms/step methodology. Archived origin: `old-ignore/2026-11-06/f2-p4-accept/`.
+Lands first two profile-review kernels (F2 fused hyper-connection mix `0920eb0ac`, P4 tiled split-K small-M F32 GEMM `52bcba210`, dispatch guards `9fb19f750`/`da11f5b99`), checks suspected 27B MTP2 toolchain regression, and establishes 5-prompt `spec_accept.sh` ms/step methodology.
 
 - Source: `52bcba210` (F2 `0920eb0ac` + P4); baseline `a27e4931e`. Toolchain A/B: same source built with ROCm 10.2.0a20261012 (clang `6da73151`) vs ROCm 10.3.0a20261105 (clang `36c1564f`, TheRock venv since 2026-11-06 00:33).
 - Models: 27B Q8_0 rev `4ca720788d1e`; Flash Next UD-IQ3_XXS rev `d96201194f10` + Q8_0 n-gram table + Q8_0 MTP sidecar (`-devd ROCm1`, ctx 100352, `-ts 0.52,0.48`, `--spec-draft-n-ubatch 64`).
@@ -764,7 +764,7 @@ Lands first two Fable-review kernels (F2 fused hyper-connection mix `0920eb0ac`,
   - `fn-new-nof2`: p1 54.6/0.745/57.68ms; p2 69.1/0.885/52.00ms; p3 65.0/0.799/50.98ms; p4 47.3/0.465/49.87ms; p5 61.0/0.706/50.35ms -> mean 59.39 / 0.720 / 52.18 ms.
 - Single-prompt CLI trap (`draft-placement/round2-and-27b.txt`): 27B old vs new CLI gave 62.1/61.3 (`dd228997b103`) vs 53.7/52.9 (`4f76946736c2`) due to greedy text divergence and acceptance swing (10-18%), motivating the rule never to use single-prompt `llama-cli` MTP TG for A/B.
 - KLD & unit checks (Flash Next, same-build base, 4 chunks): `-ub 256` vs `-ub 512` KLD `4.66e-3`; `-ts 0.52,0.48` vs `1/1` KLD `4.74e-3`; P4 per matmul family `4.7-5.1e-3`; F2 at `-b 8 -ub 8` (2 chunks) `4.4e-3`; same top token 98.0-98.9%, PPL unchanged. P4 controls: matches rocBLAS to ~2e-6 rel (max diff 1e-5); running P4 but keeping rocBLAS output gives KLD 0; scaling `ssm_alpha` by `1 +- 3e-7` gives `4.7e-3` (proving model sensitivity floor). `DSV4_HC_MIX` 12/12 vs CPU, `MUL_MAT` 2520/2520 pass.
-- Rejected/unbuilt from Fable round 1: F1 (load-time rect copies misread as runtime), Q1 (later shown already fused), N3 (not built), T1 (unfinished WIP: wrong output from token 1, 3282 -> 3115 launches).
+- Rejected/unbuilt from round 1 profile review: F1 (load-time rect copies misread as runtime), Q1 (later shown already fused), N3 (not built), T1 (unfinished WIP: wrong output from token 1, 3282 -> 3115 launches).
 
 ### 2026-11-06 Flash Next UD-IQ3_XXS at 100K with MTP3 and grouped MoE default
 

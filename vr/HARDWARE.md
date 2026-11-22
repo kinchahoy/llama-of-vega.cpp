@@ -193,7 +193,7 @@ Reference matrix for judging external PRs and optimizations (grade D spec backgr
 
 **What carries over to gfx906**:
 - **YES**: Weight repack layouts, wide coalesced loads, fewer memory passes, kernel fusion, HIP graph capture, word-op rewrites of emulated byte-SIMD (`__vsub4` / `__vcmpne4` cost ~6 word ops on GCN -> S2 word ops gave +5.1% FN TG), software-dequantized repacked NVFP4 (layout variant of IQ4_NL), short speculative drafts (MTP2-3, DFlash5), tiled split-K small-M SGEMM, long-context KV tile skipping and GQA head grouping.
-- **NO**: Tensor-core / MFMA / WMMA GEMM libraries (Marlin, CUTLASS, FA2/FA3, AITER), native FP8/FP4 arithmetic, large-cache persistence assumptions (only 4 MB L2), deep speculative verify trees, P2P custom AllReduce (no P2P on this board), warp32-hardcoded reductions (note HIP >= 7 `__ballot_sync(0xFFFFFFFF, p)` silently drops lanes 32-63), or quantized KV cache (excluded by owner accuracy rule in [GOALS.md](GOALS.md)).
+- **NO**: Tensor-core / MFMA / WMMA GEMM libraries (Marlin, CUTLASS, FA2/FA3, AITER), native FP8/FP4 arithmetic, large-cache persistence assumptions (only 4 MB L2), deep speculative verify trees, P2P custom AllReduce (no P2P on this board), warp32-hardcoded reductions (note HIP >= 7 `__ballot_sync(0xFFFFFFFF, p)` silently drops lanes 32-63), or quantized KV cache (excluded by the F16 KV policy in [GOALS.md](GOALS.md)).
 - **RTX 3090 note**: `#if defined(GGML_USE_HIP) && defined(__gfx906__)` code compiles out cleanly on CUDA; generic fork wins (MTP replay, DFlash taps, split KV/rollback fixes, tied head / shared-expert TP split, host n-gram placement) still apply.
 
 ## Calibration microbenchmarks
@@ -201,7 +201,8 @@ Reference matrix for judging external PRs and optimizations (grade D spec backgr
 Standalone HIP sources in `vr/bench/` (no model loads, compile in seconds):
 
 ```bash
-source $THEROCK_ENV
+# Optional: source your ROCm / TheRock environment if not on PATH
+# source "${THEROCK_ENV:-/path/to/therock.sh}"
 clang++ -x hip --offload-arch=gfx906 -O3 -std=c++17 vr/bench/<file>.cpp -pthread -o /tmp/bench_bin
 ```
 

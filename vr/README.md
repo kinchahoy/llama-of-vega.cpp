@@ -7,7 +7,8 @@ Local `llama.cpp` fork (`main` branch, upstream base `e6d624b9a`) tuned for two 
 Always use the TheRock ROCm environment and `max-ilp` + `-O3` flags (missing them loses 2-3% on 27B). Never rename a build directory (`RUNPATH` is absolute); point `build-current` / `build-previous` symlinks instead.
 
 ```bash
-source $THEROCK_ENV
+# Optional: source your ROCm / TheRock environment if not on PATH
+# source "${THEROCK_ENV:-/path/to/therock.sh}"
 cmake -S . -B build-new \
   -DGGML_HIP=ON -DGGML_HIP_GRAPHS=ON -DGGML_HIP_RCCL=OFF \
   -DGGML_HIP_NO_VMM=ON -DGGML_HIP_MMQ_MFMA=ON \
@@ -19,9 +20,9 @@ cmake -S . -B build-new \
 cmake --build build-new --target llama-cli llama-completion llama-server llama-bench llama-batched-bench vr-test-gfx906-tp vr-test-flashnext-moe -j 8
 ```
 
-## Quick run & live server
+## Quick run & server
 
-Active symlinks in repo root: `build-current -> build-dspark-20261122` (`3a8d768df`, opt-in DSpark), `build-previous -> build-final-20261122` (`ae32e5e58`).
+Use symlinks in the repo root (e.g. `build-current -> build-<tag>-<date>`, `build-previous -> build-<prev>-<date>`) rather than renaming build directories.
 
 ```bash
 # Single-request CLI (Qwen3.8-27B Q8_0, 50/50 TP; add --spec-type draft-mtp --spec-draft-n-max 2 --spec-draft-backend-sampling for MTP2)
@@ -30,18 +31,17 @@ Active symlinks in repo root: `build-current -> build-dspark-20261122` (`3a8d768
   -ngl 999 -dev ROCm0,ROCm1 -sm tensor -ts 1,1 -fa on \
   -b 2048 -ub 2048 -c 32768 -t 20 -tb 20 --temp 0 --top-k 1 -s 42
 
-# Router server (serves qwen27b, qwen27b-dflash, flashnext, flashnext-long, gemma4)
+# Router server (serves presets from vr/server/models.local.ini if present, else models.ini)
 vr/server/serve.sh
-# Or systemd unit: systemctl status|start|stop llama-model-server
 ```
 
-Keep HIP graphs on and RCCL off on this host (MI50 is on chipset PCIe lanes; default host-staged AllReduce runs with no env switch).
+Keep HIP graphs on and RCCL off on boards without direct P2P (default host-staged AllReduce runs with no env switch).
 
 ## Directory map
 
 | Path | Purpose |
 | --- | --- |
-| [GOALS.md](GOALS.md) | **Read first**: owner mission, 50-100K+ 1-4 slot workload, priority hierarchy, accuracy & deviation rules |
+| [GOALS.md](GOALS.md) | **Read first**: fork goals, 50-100K+ 1-4 slot workload, priority hierarchy, accuracy & tradeoff guidelines |
 | [HARDWARE.md](HARDWARE.md) | Measured gfx906 constants (Q1 occupancy, Q2 streaming, Q3 DMA exchange), one-block rule, MI60/MI50 asymmetry, cross-GPU portability |
 | [PERFORMANCE.md](PERFORMANCE.md) | Live baselines, 2026-11-22 BA-4 audit & skeptical findings, method/testing rules, token breakdowns, prioritized worklist, 28 lost routes, retired claims |
 | [BENCHMARK-TIMELINE.md](BENCHMARK-TIMELINE.md) | Append-only chronological benchmark history and dated experiment records |

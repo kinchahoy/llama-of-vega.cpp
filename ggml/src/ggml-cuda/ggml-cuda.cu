@@ -7467,10 +7467,18 @@ static bool ggml_backend_cuda_device_supports_op(ggml_backend_dev_t dev, const g
             const auto ok_w = [](const ggml_tensor * w) {
                 return (w->type == GGML_TYPE_F32 || w->type == GGML_TYPE_Q8_0) && ggml_is_contiguous(w);
             };
+            // dsv4_hc_mix dispatches HS = ne[0] / (8 * warp_size) in 1..8
+            const int ws = ggml_cuda_info().devices[dev_ctx->device].warp_size;
+            const int64_t hc_dim = x->ne[0] * x->ne[1];
             return x->type == GGML_TYPE_F32 && op->src[1]->type == GGML_TYPE_F32 && op->src[3]->type == GGML_TYPE_F32 &&
                 op->type == GGML_TYPE_F32 && ok_w(op->src[2]) && ok_w(op->src[4]) &&
                 ggml_is_contiguous(x) && ggml_is_contiguous(op->src[1]) && ggml_is_contiguous(op->src[3]) &&
-                x->ne[2] <= 8 && x->ne[1] == 4 && x->ne[0] % 512 == 0 && x->ne[0] <= 4096 && op->src[2]->ne[1] % 32 == 0 && op->src[4]->ne[0] <= 512;
+                x->ne[2] >= 1 && x->ne[2] <= 8 && x->ne[1] == 4 &&
+                x->ne[0] > 0 && x->ne[0] % 512 == 0 && x->ne[0] % (8 * ws) == 0 && x->ne[0] <= 64 * ws &&
+                ggml_nelements(op->src[1]) == hc_dim &&
+                op->src[2]->ne[0] == hc_dim && op->src[2]->ne[1] > 0 && op->src[2]->ne[1] % 32 == 0 &&
+                op->src[3]->ne[0] == hc_dim && op->src[3]->ne[1] == 4 &&
+                op->src[4]->ne[0] == op->src[2]->ne[1] && op->src[4]->ne[1] == hc_dim && op->src[4]->ne[0] <= 512;
         }
         case GGML_OP_CLIP_ROWS:
             return op->type == GGML_TYPE_F32 && op->src[0]->type == GGML_TYPE_F32 && ggml_is_contiguous(op->src[0]) &&

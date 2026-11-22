@@ -104,15 +104,19 @@ bool ggml_cuda_should_use_sgemm_f32(const ggml_tensor * src0, const ggml_tensor 
     }();
     return enabled && GGML_CUDA_CC_IS_GCN(ggml_cuda_info().devices[ggml_cuda_get_device()].cc)
         && src0->type == GGML_TYPE_F32 && src1->type == GGML_TYPE_F32 && dst->type == GGML_TYPE_F32
-        && src0->ne[2] == 1 && src0->ne[3] == 1 && src1->ne[2] == 1 && src1->ne[3] == 1
+        && src0->ne[0] > 0 && src0->ne[1] > 0 && src0->ne[2] == 1 && src0->ne[3] == 1
+        && src1->ne[2] == 1 && src1->ne[3] == 1
+        && dst->ne[0] == src0->ne[1] && dst->ne[1] == src1->ne[1] && dst->ne[2] == 1 && dst->ne[3] == 1
         && src0->nb[0] == sizeof(float) && src1->nb[0] == sizeof(float)
+        && src0->nb[1] >= (size_t) src0->ne[0]*sizeof(float) && src1->nb[1] >= (size_t) src1->ne[0]*sizeof(float)
         && src0->ne[0] % SGEMM_BK == 0
         && src0->nb[1] % 16 == 0 && src1->nb[1] % 16 == 0
         && (uintptr_t) src0->data % 16 == 0 && (uintptr_t) src1->data % 16 == 0
         && ggml_is_contiguous(dst)
         && src0->ne[0] == src1->ne[0]
-        && src1->ne[1] > 16 && src1->ne[1] <= 65535 && src0->ne[1] < 128
-        && (strstr(src0->name, "hc_") || strstr(src0->name, "ssm_alpha") || strstr(src0->name, "ssm_beta"));
+        && src1->ne[1] > 16 && src1->ne[1] <= 8192 && src0->ne[1] < 128
+        && (strstr(src0->name, ".hc_") || strncmp(src0->name, "output_hc_", 10) == 0
+            || strstr(src0->name, ".ssm_alpha") || strstr(src0->name, ".ssm_beta"));
 }
 
 template <int BM, int BN>
