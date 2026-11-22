@@ -4926,6 +4926,58 @@ struct test_res_mix : public test_case {
     }
 };
 
+struct test_loop_gate : public test_case {
+    const int64_t n_embd;
+    const int64_t n_tokens;
+
+    std::string op_desc(ggml_tensor * t) override {
+        GGML_UNUSED(t);
+        return "LOOP_GATE";
+    }
+
+    std::string vars() override {
+        return VARS_TO_STR2(n_embd, n_tokens);
+    }
+
+    test_loop_gate(int64_t n_embd = 2304, int64_t n_tokens = 5)
+        : n_embd(n_embd), n_tokens(n_tokens) {}
+
+    ggml_tensor * build_graph(ggml_context * ctx) override {
+        ggml_tensor * cur     = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, n_embd, n_tokens);
+        ggml_tensor * message = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, n_embd, n_tokens);
+        ggml_tensor * gain    = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, n_embd, n_tokens);
+        ggml_tensor * forget  = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, n_embd, n_tokens);
+        ggml_tensor * out = ggml_loop_gate(ctx, cur, message, gain, forget);
+        ggml_set_name(out, "out");
+        return out;
+    }
+};
+
+struct test_rms_norm_cat : public test_case {
+    const int64_t n_embd;
+    const int64_t n_tokens;
+
+    std::string op_desc(ggml_tensor * t) override {
+        GGML_UNUSED(t);
+        return "RMS_NORM_CAT";
+    }
+
+    std::string vars() override {
+        return VARS_TO_STR2(n_embd, n_tokens);
+    }
+
+    test_rms_norm_cat(int64_t n_embd = 2304, int64_t n_tokens = 5)
+        : n_embd(n_embd), n_tokens(n_tokens) {}
+
+    ggml_tensor * build_graph(ggml_context * ctx) override {
+        ggml_tensor * a = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, n_embd, n_tokens);
+        ggml_tensor * b = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, n_embd, n_tokens);
+        ggml_tensor * out = ggml_rms_norm_cat(ctx, a, b, 1e-6f);
+        ggml_set_name(out, "out");
+        return out;
+    }
+};
+
 struct test_dsv4_hc_mix : public test_dsv4_hc {
     const int64_t n_embd;
     const int64_t n_lo;
@@ -11006,6 +11058,9 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
         test_cases.emplace_back(new test_res_mix(2304, 9, 3, nt));
         test_cases.emplace_back(new test_res_mix(2304, 2, 1, nt));
         test_cases.emplace_back(new test_res_mix(100, 4, 4, nt));
+        test_cases.emplace_back(new test_loop_gate(2304, nt));
+        test_cases.emplace_back(new test_rms_norm_cat(2304, nt));
+        test_cases.emplace_back(new test_rms_norm_cat(100, nt));
     }
     for (int64_t nt : {1, 2, 3, 4, 5, 8}) {
         test_cases.emplace_back(new test_dsv4_hc_mix(512, 64, nt));

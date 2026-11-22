@@ -417,6 +417,8 @@ extern "C" {
         GGML_OP_DSV4_HC_MIX,
         GGML_OP_CLIP_ROWS,
         GGML_OP_RES_MIX,
+        GGML_OP_LOOP_GATE,
+        GGML_OP_RMS_NORM_CAT,
         GGML_OP_TOP_K_MASK,
 
         GGML_OP_UNARY,
@@ -2519,6 +2521,21 @@ extern "C" {
             struct ggml_tensor  * query,
             struct ggml_tensor ** states,
             int                   n_states);
+
+    // loop_gate: cur - tanh(forget)*cur + tanh(gain)*message, all the same shape
+    GGML_API struct ggml_tensor * ggml_loop_gate(
+            struct ggml_context * ctx,
+            struct ggml_tensor  * cur,
+            struct ggml_tensor  * message,
+            struct ggml_tensor  * gain,
+            struct ggml_tensor  * forget);
+
+    // rms_norm_cat: a, b [n, n_tokens] -> [2*n, n_tokens], rms_norm(a) then rms_norm(b) per column
+    GGML_API struct ggml_tensor * ggml_rms_norm_cat(
+            struct ggml_context * ctx,
+            struct ggml_tensor  * a,
+            struct ggml_tensor  * b,
+            float                 eps);
 
     // hc_post: x [n_embd, n_tokens], residual [n_embd, hc, n_tokens],
     //          post [hc, n_tokens], comb [dst_hc, src_hc, n_tokens]

@@ -12618,6 +12618,48 @@ void ggml_compute_forward_res_mix(
     }
 }
 
+// ggml_compute_forward_loop_gate
+
+void ggml_compute_forward_loop_gate(
+        const ggml_compute_params * params,
+        ggml_tensor * dst) {
+    const float * cur     = (const float *) dst->src[0]->data;
+    const float * message = (const float *) dst->src[1]->data;
+    const float * gain    = (const float *) dst->src[2]->data;
+    const float * forget  = (const float *) dst->src[3]->data;
+    float * y = (float *) dst->data;
+
+    const int64_t n = ggml_nelements(dst);
+    for (int64_t i = params->ith; i < n; i += params->nth) {
+        y[i] = cur[i] - tanhf(forget[i])*cur[i] + tanhf(gain[i])*message[i];
+    }
+}
+
+// ggml_compute_forward_rms_norm_cat
+
+void ggml_compute_forward_rms_norm_cat(
+        const ggml_compute_params * params,
+        ggml_tensor * dst) {
+    const int64_t n = dst->src[0]->ne[0];
+    float eps;
+    memcpy(&eps, dst->op_params, sizeof(eps));
+
+    for (int64_t t = params->ith; t < dst->ne[1]; t += params->nth) {
+        for (int k = 0; k < 2; ++k) {
+            const float * x = (const float *) dst->src[k]->data + t*n;
+            float * y = (float *) dst->data + t*2*n + k*n;
+            float ss = 0.0f;
+            for (int64_t i = 0; i < n; ++i) {
+                ss += x[i]*x[i];
+            }
+            const float scale = 1.0f/sqrtf(ss/n + eps);
+            for (int64_t i = 0; i < n; ++i) {
+                y[i] = x[i]*scale;
+            }
+        }
+    }
+}
+
 // ggml_compute_forward_dsv4_hc_mix
 
 // Q8_0 weights are dotted with the activation quantized to int8 per 32 values, like mul_mat does

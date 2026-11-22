@@ -2155,6 +2155,14 @@ static void ggml_compute_forward(struct ggml_compute_params * params, struct ggm
             {
                 ggml_compute_forward_res_mix(params, tensor);
             } break;
+        case GGML_OP_LOOP_GATE:
+            {
+                ggml_compute_forward_loop_gate(params, tensor);
+            } break;
+        case GGML_OP_RMS_NORM_CAT:
+            {
+                ggml_compute_forward_rms_norm_cat(params, tensor);
+            } break;
         case GGML_OP_TOP_K_MASK:
             {
                 ggml_compute_forward_top_k_mask(params, tensor);
@@ -2344,6 +2352,8 @@ static int ggml_get_n_tasks(struct ggml_tensor * node, int n_threads) {
         case GGML_OP_DSV4_HC_MIX:
         case GGML_OP_CLIP_ROWS:
         case GGML_OP_RES_MIX:
+        case GGML_OP_LOOP_GATE:
+        case GGML_OP_RMS_NORM_CAT:
         case GGML_OP_TOP_K_MASK:
             {
                 n_tasks = n_threads;

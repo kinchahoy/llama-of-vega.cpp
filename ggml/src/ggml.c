@@ -1101,6 +1101,8 @@ static const char * GGML_OP_NAME[GGML_OP_COUNT] = {
     "DSV4_HC_MIX",
     "CLIP_ROWS",
     "RES_MIX",
+    "LOOP_GATE",
+    "RMS_NORM_CAT",
     "TOP_K_MASK",
 
     "UNARY",
@@ -1121,7 +1123,7 @@ static const char * GGML_OP_NAME[GGML_OP_COUNT] = {
     "SLEEP",
 };
 
-static_assert(GGML_OP_COUNT == 103, "GGML_OP_COUNT != 103");
+static_assert(GGML_OP_COUNT == 105, "GGML_OP_COUNT != 105");
 
 static const char * GGML_OP_SYMBOL[GGML_OP_COUNT] = {
     "none",
@@ -1219,6 +1221,8 @@ static const char * GGML_OP_SYMBOL[GGML_OP_COUNT] = {
     "dsv4_hc_mix(x, w_norm, w_down, w_inject, w_up)",
     "clip_rows(a, scale)",
     "res_mix(query, states...)",
+    "loop_gate(cur, message, gain, forget)",
+    "rms_norm_cat(a, b)",
     "top_k_mask(mask, top_k, score, blocks, extra)",
 
     "unary(x)",
@@ -1239,7 +1243,7 @@ static const char * GGML_OP_SYMBOL[GGML_OP_COUNT] = {
     "sleep(x)",
 };
 
-static_assert(GGML_OP_COUNT == 103, "GGML_OP_COUNT != 103");
+static_assert(GGML_OP_COUNT == 105, "GGML_OP_COUNT != 105");
 
 static_assert(GGML_OP_POOL_COUNT == 2, "GGML_OP_POOL_COUNT != 2");
 
@@ -6609,6 +6613,48 @@ struct ggml_tensor * ggml_res_mix(
         GGML_ASSERT(states[i]->type == GGML_TYPE_F32 && ggml_are_same_shape(states[i], states[0]));
         result->src[i + 1] = states[i];
     }
+
+    return result;
+}
+
+// ggml_loop_gate
+
+struct ggml_tensor * ggml_loop_gate(
+        struct ggml_context * ctx,
+        struct ggml_tensor  * cur,
+        struct ggml_tensor  * message,
+        struct ggml_tensor  * gain,
+        struct ggml_tensor  * forget) {
+    GGML_ASSERT(cur->type == GGML_TYPE_F32 && message->type == GGML_TYPE_F32 && gain->type == GGML_TYPE_F32 && forget->type == GGML_TYPE_F32);
+    GGML_ASSERT(ggml_are_same_shape(cur, message) && ggml_are_same_shape(cur, gain) && ggml_are_same_shape(cur, forget));
+
+    struct ggml_tensor * result = ggml_dup_tensor(ctx, cur);
+
+    result->op     = GGML_OP_LOOP_GATE;
+    result->src[0] = cur;
+    result->src[1] = message;
+    result->src[2] = gain;
+    result->src[3] = forget;
+
+    return result;
+}
+
+// ggml_rms_norm_cat
+
+struct ggml_tensor * ggml_rms_norm_cat(
+        struct ggml_context * ctx,
+        struct ggml_tensor  * a,
+        struct ggml_tensor  * b,
+        float                 eps) {
+    GGML_ASSERT(a->type == GGML_TYPE_F32 && b->type == GGML_TYPE_F32 && ggml_are_same_shape(a, b));
+    GGML_ASSERT(a->ne[2] == 1 && a->ne[3] == 1);
+
+    struct ggml_tensor * result = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 2*a->ne[0], a->ne[1]);
+
+    result->op     = GGML_OP_RMS_NORM_CAT;
+    result->src[0] = a;
+    result->src[1] = b;
+    ggml_set_op_params(result, &eps, sizeof(eps));
 
     return result;
 }

@@ -88,6 +88,7 @@ static bool ggml_cuda_repack_fusion_glu_ok(const ggml_tensor * glu) {
 #include "ggml-cuda/dsv4-hc.cuh"
 #include "ggml-cuda/clip-rows.cuh"
 #include "ggml-cuda/res-mix.cuh"
+#include "ggml-cuda/loop-ctrl.cuh"
 #include "ggml-cuda/set.cuh"
 #include "ggml-cuda/set-rows.cuh"
 #include "ggml-cuda/pad_reflect_1d.cuh"
@@ -3539,6 +3540,12 @@ static bool ggml_cuda_compute_forward(ggml_backend_cuda_context & ctx, struct gg
             break;
         case GGML_OP_RES_MIX:
             ggml_cuda_op_res_mix(ctx, dst);
+            break;
+        case GGML_OP_LOOP_GATE:
+            ggml_cuda_op_loop_gate(ctx, dst);
+            break;
+        case GGML_OP_RMS_NORM_CAT:
+            ggml_cuda_op_rms_norm_cat(ctx, dst);
             break;
         case GGML_OP_DSV4_HC_POST:
             ggml_cuda_op_dsv4_hc_post(ctx, dst);
@@ -7452,6 +7459,15 @@ static bool ggml_backend_cuda_device_supports_op(ggml_backend_dev_t dev, const g
             return op->type == GGML_TYPE_F32 && op->src[0]->type == GGML_TYPE_F32 && ggml_is_contiguous(op->src[0]) &&
                 (op->src[1] == nullptr || (op->src[1]->type == GGML_TYPE_F32 && ggml_is_contiguous(op->src[1]))) &&
                 op->src[0]->ne[0] <= 1024;
+        case GGML_OP_LOOP_GATE:
+        case GGML_OP_RMS_NORM_CAT: {
+            for (int i = 0; i < GGML_MAX_SRC && op->src[i]; ++i) {
+                if (op->src[i]->type != GGML_TYPE_F32 || !ggml_is_contiguous(op->src[i])) {
+                    return false;
+                }
+            }
+            return op->type == GGML_TYPE_F32 && ggml_is_contiguous(op);
+        }
         case GGML_OP_RES_MIX: {
             if (op->type != GGML_TYPE_F32 || op->src[0]->type != GGML_TYPE_F32 || !ggml_is_contiguous(op->src[0])) {
                 return false;

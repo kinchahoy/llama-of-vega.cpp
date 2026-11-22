@@ -265,8 +265,21 @@ ggml_tensor * llama_model_inkling2::graph::convolve(
 
 // mix a cross-pass message into a looped layer input: (1 - forget)*cur + gain*message, both gated on cur and message
 ggml_tensor * llama_model_inkling2::graph::control(ggml_tensor * cur, ggml_tensor * message, const loop_layer & loop, int ctrl) {
-    ggml_tensor * gate = ggml_concat(ctx0, ggml_rms_norm(ctx0, cur, 1e-6f), ggml_rms_norm(ctx0, message, 1e-6f), 0);
+    // LLAMA_INKLING_CTRL_FUSED=0 restores the old chain
+    static const bool ctrl_fused = [] {
+        const char * env = getenv("LLAMA_INKLING_CTRL_FUSED");
+        return env == nullptr || atoi(env) != 0;
+    }();
+    const bool fused = ctrl_fused && cur->type == GGML_TYPE_F32 && message->type == GGML_TYPE_F32 && ggml_is_contiguous(cur) && ggml_is_contiguous(message) &&
+        ggml_are_same_shape(cur, message) && cur->ne[2] == 1 && cur->ne[3] == 1;
+
+    ggml_tensor * gate = fused ? ggml_rms_norm_cat(ctx0, cur, message, 1e-6f) :
+        ggml_concat(ctx0, ggml_rms_norm(ctx0, cur, 1e-6f), ggml_rms_norm(ctx0, message, 1e-6f), 0);
     gate = build_lora_mm(loop.ctrl_down[ctrl], gate);
+
+    if (fused) {
+        return ggml_loop_gate(ctx0, cur, message, build_lora_mm(loop.ctrl_gain[ctrl], gate), build_lora_mm(loop.ctrl_forget[ctrl], gate));
+    }
 
     ggml_tensor * gain   = ggml_tanh(ctx0, build_lora_mm(loop.ctrl_gain[ctrl],   gate));
     ggml_tensor * forget = ggml_tanh(ctx0, build_lora_mm(loop.ctrl_forget[ctrl], gate));
