@@ -644,6 +644,10 @@ Not on the active list. Moved here from the tables above on 2026-11-22 (no row d
 | K2 (both models) | `HIP_FORCE_DEV_KERNARG=1` (kernel arguments in VRAM) | ROCm1 runs every small kernel about 0.6 us longer while its mat-vec is 1.1% slower; bare launch 2.0 us on the MI60 vs 2.6 us on the MI50 (B, microbench); the cause may be PCIe latency on chipset lanes, not tested | 27B 0-1.1 ms, Flash Next 0-2.0 ms (profiled, low confidence) | TG r3 (27B) and r5 (Flash Next) alternating plus one trace each; go if ROCm1's excess busy time (1.09 / 2.02 ms) shrinks | none; env only | `card`: 0.6 us (2.6 - 2.0 bare, MI50 against MI60) x 1,645 launches = 0.99 ms upper bound on ROCm1, low confidence | parameter (last stage, needs owner permission) |
 | SP3 | Measure the verify cost curve for 1-8 columns, then re-tune draft depth | server per-position acceptance (DFlash5 0.775/0.624/0.509/0.425/0.353, MTP2 0.843/0.690) with about 1.7 ms per extra verify column (Oct 12) predicts DFlash7 and MTP3 should win; the 2026-11-05 llama-cli runs measured DFlash7 -7.7% and MTP3 -3.8% (B) | 0-8% | `llama-bench -p 1,2,...,8 -n 0 -r 5` on both models; no code | none | `guess`: needs the verify cost curve for 1-8 columns | parameter (last stage, needs owner permission) |
 
+### Added 2026-11-22: DSpark step cost (Inkling 2 Mini)
+
+Kind: kernel/code. Priced by: guess (needs one trace of a speculative step). A DSpark step costs about 2.1 to 2.2 plain tokens (56 to 59 ms) and returns 1.9 to 2.2 tokens at the publisher's settings (A for the timing, [record](PERFORMANCE-RECORDS.md#2026-11-22-inkling-2-dspark-drafting-opt-in-not-a-speed-gain-yet)). If the verify batch of 4 tokens cost what one token costs plus its extra work, the step would be near 1.3 plain tokens and DSpark would give about 1.5 times TG (C, estimate). Cheapest test: one `rocprofv3` trace of a short DSpark run and `kernel_budget.py`, compared with a plain trace by kernel. Do not change `--spec-draft-n-max` or other settings first.
+
 ## Retired claims
 
 Each row: what the old text claimed, what is known now, and where. Grades are in "now".

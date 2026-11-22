@@ -34,6 +34,25 @@ Change is `(candidate / baseline - 1) * 100` on the same row type. Write `-` for
 ## Records
 
 
+### 2026-11-22 Inkling 2 DSpark drafting (opt-in, not a speed gain yet)
+
+In plain words: the block drafter for Inkling 2 Mini now loads and drafts in this fork, but at the publisher's settings a speculative step costs more than it saves on these cards. Nothing changes unless `--spec-type draft-dspark` is passed. Code: `3a8d768df`, a port of the open upstream pull request ggml-org#32218 (commit `0a9105de4`, applied with no conflicts; one fork comment restored by hand). Build `build-dspark-20261122`. Draft: `unsloth/Inkling-2-Mini-GGUF` `dspark-Inkling-2-Mini-Q8_0.gguf` (402 MB, HF cache). Settings: the publisher's, `--spec-type draft-dspark --spec-draft-n-max 3 -ngld 99`; no setting was tuned (owner rule: parameter tuning is the last stage).
+
+`llama-server`, NVFP4 file, ROCm0, greedy, 200 tokens, order off, on, on, off, GPU at or below 40C (A for the order; one prompt each):
+
+| Prompt | TG off | TG on | Accepted / drafted | Mean accepted length |
+| --- | ---: | ---: | ---: | ---: |
+| short | 37.5, 37.8 | 33.5, 33.8 | 93 / 310 (0.30) | 1.89 |
+| 3255 tokens | 36.6, 36.5 | 37.6, 37.4 | 109 / 265 (0.41) | 2.22 |
+
+Argued from these numbers: a speculative step takes 1.89 / 33.65 = 56 ms (short) and 2.22 / 37.5 = 59 ms (long) against 26.6 and 27.4 ms for a plain token, so a step costs about 2.1 to 2.2 plain tokens and returns 1.9 to 2.2. Break-even needs a step below about 1.9 plain tokens at this acceptance. Where the step time goes is not measured. Conjecture: the 4-token verify batch leaves single-token paths (narrow mat-vec, one-token MoE fusion, fused ops), and the draft's Markov head is BF16. One trace of a speculative step with `vr/scripts/kernel_budget.py` would price both.
+
+Lossless check (speculation on must equal off under greedy): equal for 200 tokens on the 3255-token prompt; on the short prompt the text differs from byte 40 ("earlier techniques" against "earlier forms"), repeatably. The off logprobs there are a near tie (' forms' -1.23, ' techniques' -1.42). Argued, not proven: verification runs the tokens in a batch, and this model moves by KLD 0.005 from batching alone.
+
+Other modes on the same build (B, the scripts' own defaults): 27B MTP2 mean TG 62.1, acceptance 0.78, 40.7 ms per step; Flash Next MTP3 mean TG 57.8, acceptance 0.64. Plain speed against `build-final-20261122`, old, new, new, old: 27B TG 38.03, 37.93, 38.00, 38.07 and PP 598.7, 614.6, 596.9, 596.2; Flash Next TG 49.98, 49.79, 50.49, 50.35 and PP 640.5, 660.2, 658.9, 656.2 (no change from the port; the PP spread is in both builds). Plain Inkling NVFP4: PP2048 838.2, TG128 46.9.
+
+Open: `test-backend-sampler` `test_greedy` aborts on the Inkling model with `get_sub_batch: failed to add embedding at index 0 (error -2)`; not checked without the port. It passes on 27B.
+
 ### 2026-11-22 decode attention occupancy, two-launch reductions, hardware card
 
 In plain words: Inkling 2 Mini now keeps its speed at long context (4K context 38.2 to 43.1 t/s, 16K 33.5 to 40.5 t/s), 27B gets its first kernel gain in three weeks (+1.6% generation), and the hardware constants behind these changes are measured and written down. Code: `efb85a1a5` (`flash_attn_ext_vec` launch bounds (128, 4) on HIP), `ae32e5e58` (two-launch `res_mix` and `add_rms_norm_mul`). Old build `build-inkling-final-20261121` (`0ba4be7f1`), new build `build-final-20261122` (`ae32e5e58`). `llama-bench -r 2`, order old, new, new, old, each run started below 50C; raw data in `build-final-20261122/validation/final/`, script [final_validation_3.sh](investigation-notes/2026-11-22-hardware-card/final_validation_3.sh).
