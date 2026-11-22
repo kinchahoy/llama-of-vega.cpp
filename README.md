@@ -6,6 +6,17 @@
 
 ## Design goals & quality focus
 
+Agent optimized llama.cpp (and Unsloth llama.cpp) fork with many optimizations focused on a relatively narrow set of frontier open models that can run on 2x32GB. 
+It's hyper optimized for a pair of MI60 and MI50 Radeon datacenter cards with incredibly fast memory (HBM1) but fairly dated compute (no tensor cores etc.). I use this stack regularly and it's surprisingly power and cost effective for local inferencing.
+
+A few notes:
+- I care a fair bit about getting high quality inferencing results, so you won't see Strata style tricks to get fast tokens at the cost of accuracy (KV caches kept at FP16 typically, no experts ablated etc.)
+- As much as possible, we'll try and inference with Q8 weights, both for accuracy and because packing / unpacking tinier quants can be surprising overhead on these GPUs  
+- My current server doesn't have a great PCI topology so I'm not optimizing for RCCL at this stage
+- The GPUs are power limited (170W for MI50, 220 for MI60)
+
+I've pulled a lot of optimization ideas from many gfx906 focused repos (I've tried to have agents attribute the sources below). The few original ideas here (if any) are around setting the focus and encouraging agents to rebalance compute onto the faster card and leverage the slower card for it's equally fast memory
+
 _AI-drafted_
 
 `llama-of-vega.cpp` is a community fork of [llama.cpp](https://github.com/ggml-org/llama.cpp) tuned for long-context (50-100K+ token), 1-4 parallel slot agentic inference on legacy AMD **Vega 20 / gfx906** GPUs (**Radeon Instinct MI60 / MI50**, 32 GiB HBM2 each, no matrix units / MFMA). It is not affiliated with or endorsed by the upstream llama.cpp project; the full upstream README is preserved in [README.llama.cpp.md](README.llama.cpp.md).
