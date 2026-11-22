@@ -33,6 +33,8 @@ Measured 2026-11-22 (B, microbench; numbers in [PERFORMANCE.md](PERFORMANCE.md#w
 
 ## How to measure
 
+Start here: `python3 vr/scripts/kernel_budget.py TRACE_DIR N_TOKENS` turns one `rocprofv3` kernel trace into a ranked work list. It splits the kernels into three classes from the launch geometry in the trace: at the floor (only fewer launches help), one block and above the floor (apply the one-block rule), and many blocks above the floor (real work; check bytes against 800 GB/s). First run, 2026-11-22, on the Flash Next trace: it listed five one-block kernels above the floor that were in no hypothesis list (`topk_moe_wave_cuda<512, 10>` 1 block of 32 threads at 14.1 us, `lightning_indexer_kernel_vec`, `k_argsort_f32_i32`, `rope_multi`, `top_k_mask_kernel`; 0.92 ms excess per token per GPU in total, B, one trace).
+
 Scripts are in [investigation-notes/2026-11-21-inkling2-mini](investigation-notes/2026-11-21-inkling2-mini/).
 
 1. Kernel profile: `kernel_profile.sh` (one GPU) or the profile part of `ppl_and_focus_profiles.sh` (two GPUs). It runs `rocprofv3 --kernel-trace` on `llama-bench -p 0 -n 64` and prints calls and time per kernel from the sqlite file. Skip the first third of the launches (load and warmup).
