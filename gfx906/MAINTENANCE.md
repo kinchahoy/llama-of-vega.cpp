@@ -1,6 +1,6 @@
 # Fork Maintenance & Architecture Guide
 
-Everything needed to build, preserve, debug, extend, and merge this gfx906 fork against upstream `llama.cpp`. Current upstream base: **`e6d624b9a`** (merged 2026-11-21; core delta vs `e6d624b9a` excluding `gfx906/` is **139 files, +19,046 / -1,205 LOC**).
+Everything needed to build, preserve, debug, extend, and merge `llama-of-vega.cpp` against upstream `llama.cpp`. Current upstream base: **`e6d624b9a`** (merged 2026-11-21; core delta vs `e6d624b9a` excluding `gfx906/` is **139 files, +19,046 / -1,205 LOC**).
 
 Read [GOALS.md](GOALS.md) for priorities and [HARDWARE.md](HARDWARE.md) for measured gfx906 limits. Always follow `AGENTS.md` and `skills/code-review/SKILL.md`.
 

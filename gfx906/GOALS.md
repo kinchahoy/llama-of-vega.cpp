@@ -1,6 +1,6 @@
 # Goals and Engineering Priorities
 
-Design goals, target workloads, and tradeoff guidelines for this gfx906 fork. Read this before [HARDWARE.md](HARDWARE.md), [PERFORMANCE.md](PERFORMANCE.md), or [MAINTENANCE.md](MAINTENANCE.md). Treat individual rules in other docs as guidelines subordinate to these goals; flag conflicts or high-value tradeoffs explicitly.
+Design goals, target workloads, and tradeoff guidelines for `llama-of-vega.cpp`. Read this before [HARDWARE.md](HARDWARE.md), [PERFORMANCE.md](PERFORMANCE.md), or [MAINTENANCE.md](MAINTENANCE.md). Treat individual rules in other docs as guidelines subordinate to these goals; flag conflicts or high-value tradeoffs explicitly.
 
 ## 1. Mission
 

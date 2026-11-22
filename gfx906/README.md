@@ -1,6 +1,6 @@
-# gfx906/ - Inference Guide
+# gfx906/ - llama-of-vega.cpp Inference Guide
 
-Local `llama.cpp` fork (`main` branch, upstream base `e6d624b9a`) tuned for two 32 GiB AMD gfx906 GPUs (**ROCm0 = MI60** 64 CU / CPU PCIe lanes; **ROCm1 = MI50** 60 CU / chipset PCIe lanes). Primary targets: Qwen3.8-27B Q8_0, Qwen3.8 Flash Next, Inkling 2 Mini, and upcoming Qwen 4 at 50-100K+ context and 1-4 parallel slots.
+`llama-of-vega.cpp` (`main` branch, upstream base `e6d624b9a`) tuned for two 32 GiB AMD gfx906 GPUs (**ROCm0 = MI60** 64 CU / CPU PCIe lanes; **ROCm1 = MI50** 60 CU / chipset PCIe lanes). Primary targets: Qwen3.8-27B Q8_0, Qwen3.8 Flash Next, Inkling 2 Mini, and upcoming Qwen 4 at 50-100K+ context and 1-4 parallel slots.
 
 ## Build
 

@@ -1,6 +1,6 @@
 # gfx906 Benchmark Timeline (2026-08-12 to 2026-11-22)
 
-Single lossless, append-only historical benchmark record for this gfx906 `llama.cpp` fork on two 32 GiB AMD gfx906 GPUs. Consolidates all historical benchmark data, profiles, microbenchmarks, multi-user serving sweeps, quality/KLD checks, and optimization wins.
+Single lossless, append-only historical benchmark record for `llama-of-vega.cpp` on two 32 GiB AMD gfx906 GPUs. Consolidates all historical benchmark data, profiles, microbenchmarks, multi-user serving sweeps, quality/KLD checks, and optimization wins.
 
 Live current numbers and active worklist stay in [PERFORMANCE.md](PERFORMANCE.md). Measured hardware constants stay in [HARDWARE.md](HARDWARE.md).
 
