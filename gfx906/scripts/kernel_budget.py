@@ -10,7 +10,7 @@ the largest-grid dense LM-head anchor kernel (filtering out load, warmup, and ou
 with wall > 1.15 * median or non-modal kernel count). Falls back to prefill (pp) mode
 when fewer than 4 anchors exist or when --mode pp is given.
 
-Calibrated gfx906 hardware model (vr/HARDWARE.md):
+Calibrated gfx906 hardware model (gfx906/HARDWARE.md):
   - VGPR granule 4, pool 256/SIMD, max 8 waves/SIMD (32 waves/CU), LDS 64 KB/CU
   - Resident blocks/CU = min(floor(4 * waves_per_simd / ceil(T/64)), floor(65536 / LDS))
   - Graph-replayed launch value: 1.22 us (pure floor) to 1.70 us (launch + tiny work)
@@ -88,7 +88,7 @@ def load_gpu_agents(conn):
 
 
 def gfx906_occupancy(threads, vgpr, lds, cu_count, blocks):
-    """Calibrated Q1 occupancy formula from vr/HARDWARE.md."""
+    """Calibrated Q1 occupancy formula from gfx906/HARDWARE.md."""
     waves_per_block = max(1, (threads + 63) // 64)
     vgpr_alloc = max(4, ((max(1, vgpr) + 3) // 4) * 4)
     waves_per_simd = min(8, 256 // vgpr_alloc)

@@ -1,6 +1,6 @@
 # Fork Maintenance & Architecture Guide
 
-Everything needed to build, preserve, debug, extend, and merge this gfx906 fork against upstream `llama.cpp`. Current upstream base: **`e6d624b9a`** (merged 2026-11-21; core delta vs `e6d624b9a` excluding `vr/` is **139 files, +19,046 / -1,205 LOC**).
+Everything needed to build, preserve, debug, extend, and merge this gfx906 fork against upstream `llama.cpp`. Current upstream base: **`e6d624b9a`** (merged 2026-11-21; core delta vs `e6d624b9a` excluding `gfx906/` is **139 files, +19,046 / -1,205 LOC**).
 
 Read [GOALS.md](GOALS.md) for priorities and [HARDWARE.md](HARDWARE.md) for measured gfx906 limits. Always follow `AGENTS.md` and `skills/code-review/SKILL.md`.
 
@@ -14,12 +14,12 @@ Use the local TheRock ROCm environment with exact comparison flags (`max-ilp` an
 cmake -S . -B "$CAND" \
   -DGGML_HIP=ON -DGGML_HIP_GRAPHS=ON -DGGML_HIP_RCCL=OFF \
   -DGGML_HIP_NO_VMM=ON -DGGML_HIP_MMQ_MFMA=ON \
-  -DLLAMA_OPENSSL=ON -DLLAMA_BUILD_VR_EXPERIMENTS=ON \
+  -DLLAMA_OPENSSL=ON -DLLAMA_BUILD_GFX906_TESTS=ON \
   -DAMDGPU_TARGETS=gfx906 -DCMAKE_BUILD_TYPE=Release \
   -DHIP_COMPILER=clang -DCMAKE_PREFIX_PATH="$(rocm-sdk path --cmake)" \
   -DCMAKE_HIP_FLAGS="-mllvm -amdgpu-sched-strategy=max-ilp" \
   -DCMAKE_CXX_FLAGS="-O3 -Wno-unused-command-line-argument"
-cmake --build "$CAND" --target llama-cli llama-completion llama-server llama-bench llama-batched-bench vr-test-gfx906-tp vr-test-flashnext-moe -j 8
+cmake --build "$CAND" --target llama-cli llama-completion llama-server llama-bench llama-batched-bench gfx906-test-tp gfx906-test-flashnext-moe -j 8
 ```
 
 - **Build-retention policy**: Retain **1-2 well-tested performant timestamped builds** in addition to the active working build (`build-current` and `build-previous` symlinks in the repo root, e.g. `build-current -> build-<tag>-<date>`).
@@ -81,8 +81,8 @@ Everything outside `ggml/src/ggml-cuda/q8_repack/` includes only `repack.cuh` (f
 | Feature | Preserve across merges | Final checks when affected |
 | --- | --- | --- |
 | Repack & MMQ/MMVQ | Upload, layout, dispatch, consumers, meta type whitelist, row-first gfx906 MMQ & J cap | TP smoke, greedy gen, matched PP/TG; NVFP4 KLD on/off |
-| Narrow IQ2_S & grouped MoE | IQ2_S even-row 1-col guard; grouped MoE default on for narrow IQ2_S/IQ4_NL with original routing & fallback | `vr-test-flashnext-moe`, Flash Next MTP output |
-| AllReduce & TP lanes | First `#if !defined(GGML_USE_MUSA)` branch in `allreduce.cu` compiled for HIP with no env switch; graph-safe counters, duplex/slabs, no new per-ubatch host sync | `vr-test-gfx906-tp --n 1` and `--n 2048`, matched PP/TG |
+| Narrow IQ2_S & grouped MoE | IQ2_S even-row 1-col guard; grouped MoE default on for narrow IQ2_S/IQ4_NL with original routing & fallback | `gfx906-test-flashnext-moe`, Flash Next MTP output |
+| AllReduce & TP lanes | First `#if !defined(GGML_USE_MUSA)` branch in `allreduce.cu` compiled for HIP with no env switch; graph-safe counters, duplex/slabs, no new per-ubatch host sync | `gfx906-test-tp --n 1` and `--n 2048`, matched PP/TG |
 | F2 (`DSV4_HC_MIX`) & P4 (`SGEMM_F32`) | Op enum + `GGML_OP_COUNT` asserts, CPU ref, meta whitelist, hc repack exemption; P4 GCN-only small-M before rocBLAS | `test-backend-ops -o DSV4_HC_MIX -o MUL_MAT`, FN PP & `-b 8 -ub 8` KLD |
 | Inkling fused ops & banded FA | All 5 ops + `GGML_OP_FLASH_ATTN_EXT_BANDED` + `fattn-tile.cuh` `use_banded` + ring state (`upload_s_copy`, `fill_s_write`) + `can_reuse` | `test-backend-ops`, Inkling ROCm0 + `--device none`, PP2048 ub 512/2048, banded KLD |
 | AMD `kv_rows` FA & MoE counting sort | `use_kv_rows` template (plain kernels keep VGPRs), `fattn.cu` F16 TILE, meta `src[5]`; counting sort skips out-of-slice ids & writes `expert_bounds` | `test-backend-ops -o FLASH_ATTN_EXT -o MUL_MAT_ID`, [scripts/bench_multiuser.sh](scripts/bench_multiuser.sh) |
@@ -147,12 +147,12 @@ Every one of these merged or compiled cleanly on past upstream catch-ups but sil
    done
    ```
 4. **Affected features only**:
-   - AllReduce / TP touched: `"$CAND/bin/vr-test-gfx906-tp" --n 1 --check && "$CAND/bin/vr-test-gfx906-tp" --n 2048 --check` (both must report `check=pass`).
+   - AllReduce / TP touched: `"$CAND/bin/gfx906-test-tp" --n 1 --check && "$CAND/bin/gfx906-test-tp" --n 2048 --check` (both must report `check=pass`).
    - Numerics / sampling touched: `llama-completion --temp 0 --top-k 1 -s 42 -n 32 -no-cnv --simple-io --no-display-prompt`.
    - Flash attention, KV cache, ubatch splitting, or server slots touched: [scripts/bench_multiuser.sh](scripts/bench_multiuser.sh) (`4x16K` unified KV + 4-way TG; `REPS=2` if within 3%). Reference 2026-11-15 baselines (`kv_rows` on vs off):
      - 27B Q8_0: **577.8 / 577.5 PP**, **80.86 / 80.93 4-way TG** (off: 462.3 PP, 81.1 TG). Drop toward 462 PP means `kv_rows` stopped engaging.
      - Flash Next UD-IQ3_XXS: **470.5 / 473.1 PP**, **84.17 / 83.90 4-way TG** (off: 472.2 PP, 84.2 TG).
-   - MoE / speculative / Inkling touched: `test-backend-ops`, `vr-test-flashnext-moe`, [scripts/spec_accept.sh](scripts/spec_accept.sh), or targeted model KLD.
+   - MoE / speculative / Inkling touched: `test-backend-ops`, `gfx906-test-flashnext-moe`, [scripts/spec_accept.sh](scripts/spec_accept.sh), or targeted model KLD.
 5. **Promotion**: Once validated and committed, update symlinks (`ln -sfn "$BASE" build-previous && ln -sfn "$CAND" build-current`) without renaming build directories.
 
 ## How to add a fused op

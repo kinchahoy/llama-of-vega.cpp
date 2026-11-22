@@ -252,7 +252,7 @@ Testing:
 
 ## Head merge check
 
-- For this fork, read [vr/GOALS.md](vr/GOALS.md) and follow [vr/MAINTENANCE.md](vr/MAINTENANCE.md). Use one final validation pass and retain 1-2 well-tested performant timestamped builds (`build-current`, `build-previous`) in addition to the working build.
+- For this fork, read [gfx906/GOALS.md](gfx906/GOALS.md) and follow [gfx906/MAINTENANCE.md](gfx906/MAINTENANCE.md). Use one final validation pass and retain 1-2 well-tested performant timestamped builds (`build-current`, `build-previous`) in addition to the working build.
 
 - After merging upstream or mx-llama heads, confirm the default ROCm tensor-parallel path still uses the intended AllReduce. Check that `ggml/src/ggml-cuda/allreduce.cu` compiles the host-staged path for HIP and that its pipeline does not require `GGML_CUDA_TP_OVERLAP=1` for the normal configuration.
 - Rebuild and compare PP and TG with the pre-merge commit using identical `llama-bench` settings. On 2026-09-29, excluding HIP from the host-staged path reduced Qwen3.8 27B Q8_0 PP2048 by 21% and TG256 by 38% on two gfx906 GPUs.

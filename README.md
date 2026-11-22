@@ -37,7 +37,7 @@ Measured on **2x gfx906 (MI60 + MI50)**, TheRock ROCm, F16 KV cache (no KV quant
 ### Known caveats (2026-11-22)
 
 - Tested primarily on **gfx906 (MI50 / MI60)** with TheRock ROCm (`-DGGML_HIP_RCCL=OFF`). Wave32/NVIDIA/RDNA guards are in place for `DSV4_HC_MIX`, and `SGEMM_F32` is gated to GCN, but non-gfx906 targets are not regularly benchmarked here.
-- **Open high-leverage gaps** tracked in [vr/PERFORMANCE.md](vr/PERFORMANCE.md): long-context QSA tile skipping & 6:1 GQA head grouping (`G1`) at 32K-100K, the `>8` token cliff for 4-slot + speculative verify (`MU1(b)`), Inkling PP4K+ SWA ring-wrap fallback & `flash_attn_tile<128,128,64>` register spill, and Q8-reference KLD check for `SGEMM_F32` (`P4`).
+- **Open high-leverage gaps** tracked in [gfx906/PERFORMANCE.md](gfx906/PERFORMANCE.md): long-context QSA tile skipping & 6:1 GQA head grouping (`G1`) at 32K-100K, the `>8` token cliff for 4-slot + speculative verify (`MU1(b)`), Inkling PP4K+ SWA ring-wrap fallback & `flash_attn_tile<128,128,64>` register spill, and Q8-reference KLD check for `SGEMM_F32` (`P4`).
 
 ## Build & documentation
 
@@ -46,21 +46,21 @@ Measured on **2x gfx906 (MI60 + MI50)**, TheRock ROCm, F16 KV cache (no KV quant
 cmake -S . -B build-gfx906 \
   -DGGML_HIP=ON -DGGML_HIP_GRAPHS=ON -DGGML_HIP_RCCL=OFF \
   -DGGML_HIP_NO_VMM=ON -DGGML_HIP_MMQ_MFMA=ON \
-  -DLLAMA_OPENSSL=ON -DLLAMA_BUILD_VR_EXPERIMENTS=ON \
+  -DLLAMA_OPENSSL=ON -DLLAMA_BUILD_GFX906_TESTS=ON \
   -DAMDGPU_TARGETS=gfx906 -DCMAKE_BUILD_TYPE=Release \
   -DHIP_COMPILER=clang -DCMAKE_PREFIX_PATH="$(rocm-sdk path --cmake)" \
   -DCMAKE_HIP_FLAGS="-mllvm -amdgpu-sched-strategy=max-ilp" \
   -DCMAKE_CXX_FLAGS="-O3 -Wno-unused-command-line-argument"
-cmake --build build-gfx906 --target llama-cli llama-server llama-bench llama-batched-bench vr-test-gfx906-tp vr-test-flashnext-moe -j 8
+cmake --build build-gfx906 --target llama-cli llama-server llama-bench llama-batched-bench gfx906-test-tp gfx906-test-flashnext-moe -j 8
 ```
 
-Detailed fork docs live under `vr/`:
-- [vr/README.md](vr/README.md) - quickstart, run commands, and directory index
-- [vr/GOALS.md](vr/GOALS.md) - target workload, priorities, and accuracy posture
-- [vr/HARDWARE.md](vr/HARDWARE.md) - calibrated gfx906 constants (occupancy, streaming, cross-GPU exchange)
-- [vr/PERFORMANCE.md](vr/PERFORMANCE.md) - live baselines, audit findings, testing rules, and worklist
-- [vr/BENCHMARK-TIMELINE.md](vr/BENCHMARK-TIMELINE.md) - full dated benchmark timeline (2026-08-12 to present)
-- [vr/MAINTENANCE.md](vr/MAINTENANCE.md) - fork feature delta, repack layout, silent merge traps, and upstream catch-up guide
+Detailed fork docs live under `gfx906/`:
+- [gfx906/README.md](gfx906/README.md) - quickstart, run commands, and directory index
+- [gfx906/GOALS.md](gfx906/GOALS.md) - target workload, priorities, and accuracy posture
+- [gfx906/HARDWARE.md](gfx906/HARDWARE.md) - calibrated gfx906 constants (occupancy, streaming, cross-GPU exchange)
+- [gfx906/PERFORMANCE.md](gfx906/PERFORMANCE.md) - live baselines, audit findings, testing rules, and worklist
+- [gfx906/BENCHMARK-TIMELINE.md](gfx906/BENCHMARK-TIMELINE.md) - full dated benchmark timeline (2026-08-12 to present)
+- [gfx906/MAINTENANCE.md](gfx906/MAINTENANCE.md) - fork feature delta, repack layout, silent merge traps, and upstream catch-up guide
 
 ## Credits & prior art
 

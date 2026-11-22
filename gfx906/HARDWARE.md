@@ -1,6 +1,6 @@
 # Hardware Reference (gfx906)
 
-Single source of measured hardware constants for the two gfx906 GPUs (**ROCm0 = MI60**, 64 CUs, 225 W, CPU PCIe lanes; **ROCm1 = MI50**, 60 CUs, 178 W, chipset PCIe lanes) plus cross-GPU portability rules. Other documents link here instead of repeating constants. Calibration microbenchmarks live in [vr/bench/](bench/q1_occupancy.cpp).
+Single source of measured hardware constants for the two gfx906 GPUs (**ROCm0 = MI60**, 64 CUs, 225 W, CPU PCIe lanes; **ROCm1 = MI50**, 60 CUs, 178 W, chipset PCIe lanes) plus cross-GPU portability rules. Other documents link here instead of repeating constants. Calibration microbenchmarks live in [gfx906/bench/](bench/q1_occupancy.cpp).
 
 Rerun the microbenches only after a ROCm, driver, or hardware change, or for a genuinely new hard question. A mismatch above ~20% between a card prediction and a real kernel trace updates the card (see [Checks against real kernels](#checks-against-real-kernels)).
 
@@ -42,7 +42,7 @@ Grades: **A** alternated A/B on a real model, **B** single measurement or microb
 
 ## Calibrations (2026-11-22)
 
-All three calibrations are grade B microbenchmarks (~8 GPU-minutes total). Sources are in `vr/bench/`.
+All three calibrations are grade B microbenchmarks (~8 GPU-minutes total). Sources are in `gfx906/bench/`.
 
 ### Q1: Occupancy (blocks resident per CU)
 
@@ -198,12 +198,12 @@ Reference matrix for judging external PRs and optimizations (grade D spec backgr
 
 ## Calibration microbenchmarks
 
-Standalone HIP sources in `vr/bench/` (no model loads, compile in seconds):
+Standalone HIP sources in `gfx906/bench/` (no model loads, compile in seconds):
 
 ```bash
 # Optional: source your ROCm / TheRock environment if not on PATH
 # source "${THEROCK_ENV:-/path/to/therock.sh}"
-clang++ -x hip --offload-arch=gfx906 -O3 -std=c++17 vr/bench/<file>.cpp -pthread -o /tmp/bench_bin
+clang++ -x hip --offload-arch=gfx906 -O3 -std=c++17 gfx906/bench/<file>.cpp -pthread -o /tmp/bench_bin
 ```
 
 | File | Measures |

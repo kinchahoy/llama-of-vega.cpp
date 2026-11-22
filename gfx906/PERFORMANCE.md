@@ -46,8 +46,8 @@ Zero-GPU-hour audits of saved `rocprofv3` traces (with calibrated Q1 occupancy i
 
 Compact version of the four-stage model-first workflow (order of work follows [GOALS.md](GOALS.md): reusable kernels & Qwen 4 first -> model-specific kernels -> architectural placement -> parameter tuning last):
 
-1. **Learn the hardware once**: synthetic microbenchmarks in `vr/bench/` populate [HARDWARE.md](HARDWARE.md). Never spend an end-to-end run answering a question a microbench answers in seconds.
-2. **Predict from traces on disk**: run `python3 vr/scripts/kernel_budget.py TRACE_DIR` on saved `rocprofv3` SQLite traces. Read geometry (`blocks`, `VGPR`, `LDS`, `scratch`, per-GPU skew) before naming a mechanism.
+1. **Learn the hardware once**: synthetic microbenchmarks in `gfx906/bench/` populate [HARDWARE.md](HARDWARE.md). Never spend an end-to-end run answering a question a microbench answers in seconds.
+2. **Predict from traces on disk**: run `python3 gfx906/scripts/kernel_budget.py TRACE_DIR` on saved `rocprofv3` SQLite traces. Read geometry (`blocks`, `VGPR`, `LDS`, `scratch`, per-GPU skew) before naming a mechanism.
 3. **Design on paper in batches**: compute predicted ms/tok from [HARDWARE.md](HARDWARE.md). Skip changes predicting **<1%**. Tune kernel parameters in standalone sandboxes, not full model builds.
 4. **One confirmation per batch** (<=1 build, <=10-15 GPU-min): `test-backend-ops` (plus `--device none` CPU check for new ops), one short trace comparing measured vs predicted (>20% mismatch updates [HARDWARE.md](HARDWARE.md)), and one cool-start alternated ABBA run per affected model.
 
@@ -95,7 +95,7 @@ Ordered for [GOALS.md](GOALS.md): 50-100K+ PP+TG, 1-4 parallel slots, and Qwen 4
 | **MU1(b) + SP3** | All models (2-4 slots, MTP/DFlash/DSpark) | First measure `llama-bench -p 1..16 -n 0` cliff (`SP3`); extend dense `nc` MMV past 8 cols & add MoE wide-GEMV w/ LDS staging (`alex4300` style) to stop `w32` 94-97% lane waste | Closes 81 -> 61 t/s 4-slot MTP gap (**+20-30% 4-slot TG**); helps DSpark 4-tok verify | `SP3` 1..16 col curve (no code), then kernel sandbox + 4-slot ABBA |
 | **TB5** | Flash Next TG | Fix **3.04 ms pre-graph host token-start gap** (device-side QSA k-pool / n-gram ids or host timestamp root-cause) | Up to **~12-15% FN TG** (3.04 ms of ~20-26 ms) | Host timestamps around graph compute / input prep (no GPU rebuild) |
 | **TB3** | 27B, FN, Qwen 4 TG | Fused GDN decode step (conv + l2 norms + gates + GDN + gated norm: ~13 -> 2-3 launches/layer) | 27B: 480 launches x 1.22-1.7 us = **0.6-0.8 ms**; FN: **0.4-0.6 ms** (+ Qwen 4) | Check upstream fused GDN; dump 1 layer trace, sandbox microbench |
-| **AR-CAP + SURGICAL** | All models (tiny LOC / bugs) | (1) `allreduce.cu` dynamic block cap (~5 LOC, stops 5-6 idle blocks spamming `3x __threadfence_system()`); (2) `fattn-vec.cuh` `any_weight` zero-skip on V under `V_DOT2_F32_F16`; (3) `qwen4exp_conv_windows` 9 launches/layer under MTP; (4) `P4` stride/size guards (`ne11<=65535`, `ne00` match, tighten `"hc_"` match) + Q8-ref KLD; (5) `F2` wave32 guard; (6) `unsloth #241` empty-graph guard | Low-risk efficiency + correctness; AR-CAP cuts redundant PCIe fence storms on 96-128 AR/tok | Unit tests, `vr-test-gfx906-tp`, trace check, KLD |
+| **AR-CAP + SURGICAL** | All models (tiny LOC / bugs) | (1) `allreduce.cu` dynamic block cap (~5 LOC, stops 5-6 idle blocks spamming `3x __threadfence_system()`); (2) `fattn-vec.cuh` `any_weight` zero-skip on V under `V_DOT2_F32_F16`; (3) `qwen4exp_conv_windows` 9 launches/layer under MTP; (4) `P4` stride/size guards (`ne11<=65535`, `ne00` match, tighten `"hc_"` match) + Q8-ref KLD; (5) `F2` wave32 guard; (6) `unsloth #241` empty-graph guard | Low-risk efficiency + correctness; AR-CAP cuts redundant PCIe fence storms on 96-128 AR/tok | Unit tests, `gfx906-test-tp`, trace check, KLD |
 
 ### Tier 2: Targeted BA-4, PP & speculative wins
 

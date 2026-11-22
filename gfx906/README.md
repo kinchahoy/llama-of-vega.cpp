@@ -1,4 +1,4 @@
-# vr/ - gfx906 Inference Guide
+# gfx906/ - Inference Guide
 
 Local `llama.cpp` fork (`main` branch, upstream base `e6d624b9a`) tuned for two 32 GiB AMD gfx906 GPUs (**ROCm0 = MI60** 64 CU / CPU PCIe lanes; **ROCm1 = MI50** 60 CU / chipset PCIe lanes). Primary targets: Qwen3.8-27B Q8_0, Qwen3.8 Flash Next, Inkling 2 Mini, and upcoming Qwen 4 at 50-100K+ context and 1-4 parallel slots.
 
@@ -12,12 +12,12 @@ Always use the TheRock ROCm environment and `max-ilp` + `-O3` flags (missing the
 cmake -S . -B build-new \
   -DGGML_HIP=ON -DGGML_HIP_GRAPHS=ON -DGGML_HIP_RCCL=OFF \
   -DGGML_HIP_NO_VMM=ON -DGGML_HIP_MMQ_MFMA=ON \
-  -DLLAMA_OPENSSL=ON -DLLAMA_BUILD_VR_EXPERIMENTS=ON \
+  -DLLAMA_OPENSSL=ON -DLLAMA_BUILD_GFX906_TESTS=ON \
   -DAMDGPU_TARGETS=gfx906 -DCMAKE_BUILD_TYPE=Release \
   -DHIP_COMPILER=clang -DCMAKE_PREFIX_PATH="$(rocm-sdk path --cmake)" \
   -DCMAKE_HIP_FLAGS="-mllvm -amdgpu-sched-strategy=max-ilp" \
   -DCMAKE_CXX_FLAGS="-O3 -Wno-unused-command-line-argument"
-cmake --build build-new --target llama-cli llama-completion llama-server llama-bench llama-batched-bench vr-test-gfx906-tp vr-test-flashnext-moe -j 8
+cmake --build build-new --target llama-cli llama-completion llama-server llama-bench llama-batched-bench gfx906-test-tp gfx906-test-flashnext-moe -j 8
 ```
 
 ## Quick run & server
@@ -31,8 +31,8 @@ Use symlinks in the repo root (e.g. `build-current -> build-<tag>-<date>`, `buil
   -ngl 999 -dev ROCm0,ROCm1 -sm tensor -ts 1,1 -fa on \
   -b 2048 -ub 2048 -c 32768 -t 20 -tb 20 --temp 0 --top-k 1 -s 42
 
-# Router server (serves presets from vr/server/models.local.ini if present, else models.ini)
-vr/server/serve.sh
+# Router server (serves presets from gfx906/server/models.local.ini if present, else models.ini)
+gfx906/server/serve.sh
 ```
 
 Keep HIP graphs on and RCCL off on boards without direct P2P (default host-staged AllReduce runs with no env switch).
@@ -56,5 +56,5 @@ Keep HIP graphs on and RCCL off on boards without direct P2P (default host-stage
 | [bench/q3_exchange.cpp](bench/q3_exchange.cpp) | Standalone microbench: host-staged D2H/H2D/duplex DMA latency & bandwidth |
 | [bench/one_block.cpp](bench/one_block.cpp) | Standalone microbench: one-block cost curve, threads/block, barriers vs phases, 2-kernel form |
 | [bench/launch_floor.cpp](bench/launch_floor.cpp) | Standalone microbench: bare HIP launch cost on MI60/MI50 & multi-stream throughput |
-| [test-gfx906-tp.cpp](test-gfx906-tp.cpp) | Focused AllReduce / TP smoke test (`vr-test-gfx906-tp --n 1 --check` and `--n 2048 --check`) |
-| [test-flashnext-moe.cpp](test-flashnext-moe.cpp) | Focused grouped-MoE CPU-reference test (`vr-test-flashnext-moe`) |
+| [test-gfx906-tp.cpp](test-gfx906-tp.cpp) | Focused AllReduce / TP smoke test (`gfx906-test-tp --n 1 --check` and `--n 2048 --check`) |
+| [test-flashnext-moe.cpp](test-flashnext-moe.cpp) | Focused grouped-MoE CPU-reference test (`gfx906-test-flashnext-moe`) |

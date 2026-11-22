@@ -155,6 +155,6 @@ AGENTS.local.md
 .pi/SYSTEM.md
 
 # Local rocprofv3 trace archives and machine-local server presets/env (untracked)
-/vr/traces/
-/vr/server/models.local.ini
-/vr/server/env.local.sh
+/gfx906/traces/
+/gfx906/server/models.local.ini
+/gfx906/server/env.local.sh

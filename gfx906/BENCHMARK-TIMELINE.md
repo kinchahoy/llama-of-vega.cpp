@@ -61,7 +61,7 @@ Verdict: one sentence, with grade. Not covered: what was not run.
 
 ### 1.1 Master Landed Wins Index (W01-W37 and Config/Check Milestones K1x-K7x)
 
-Compiled from `vr/investigation-notes/2026-11-22-process-retro/history-retro.md` plus `R-IN10` (2026-11-22). Pre-2026-10-29 fork commits were squashed into `f5031e739`, so earlier landing dates come from dated logs.
+Compiled from `gfx906/investigation-notes/2026-11-22-process-retro/history-retro.md` plus `R-IN10` (2026-11-22). Pre-2026-10-29 fork commits were squashed into `f5031e739`, so earlier landing dates come from dated logs.
 
 | ID | Name | Model(s) | Landed | Commit / Build | Measured Effect (Grade) | Origin | Mechanism |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -198,7 +198,7 @@ Config / Check / Aggregate rows (Type K from `history-retro.md`):
 | 2026-09-10 | `fd04166db` (10902) `03-mxxm-repack-moe` | Gemma 4 31B-it Q8_0 (`c1ac76e99d55`) | 2 GPU TP, d16384, b/ub 4096, t4, PP2048/TG256, r1 | 318.76 | 22.50 | First Gemma 4 TP record |
 | 2026-09-10 | `0abd145ec` (10903) `04-vr-bench-harness` | Gemma 4 31B-it Q8_0 (`c1ac76e99d55`) | Same | 322.71 | 21.18 | Harness checkpoint |
 | 2026-11-10 | `0f7ce1b04` (`build-exp-spec`) | Gemma 4 31B-it Q8_0 (`c1ac76e99d55`) | 2 GPU TP, d0, b/ub 2048, PP2048 / TG64 (unprofiled) | 602.45 +- 1.40 | 32.68 +- 0.15 | Token budget baseline (1463 kernels/tok, 120 AR) |
-| 2026-11-10 | `vr/server/serve.sh` router smoke | Gemma 4 31B-it Q8_0 (router preset `gemma4`) | `llama-server` router mode, 96-token reply (B) | - | 32 | Router smoke: 27B 51 / 27B-DF 61 / FN 48 / G4 32 |
+| 2026-11-10 | `gfx906/server/serve.sh` router smoke | Gemma 4 31B-it Q8_0 (router preset `gemma4`) | `llama-server` router mode, 96-token reply (B) | - | 32 | Router smoke: 27B 51 / 27B-DF 61 / FN 48 / G4 32 |
 
 ---
 
@@ -433,7 +433,7 @@ Merge `296a9e2c0` + build fixes, peer-AR archival (`2ec03a2e3`) and removal of ~
 Ports upstream `ggml_flash_attn_ext_rows` (#29510) to the gfx906 HIP tile kernel (F16 K/V only), adds a work gate in `get_n_kv_rows` so single-sequence/all-slot-decode batches stay on the dense path, and fixes a multi-slot MTP rollback abort (`3bd5e1909`, sequential ubatch split when `n_rs_seq > 0`). Archived origin: `investigation-notes/2026-11-15-kvrows-gfx906/`.
 
 - Source: `518d6233d..7ddd49693` (final kernels `80212cad5`, work gate `7ddd49693`); build `build-kvrows-20261116` vs `build-catchup-20261113-200420`.
-- Multi-user A/B (`vr/scripts/bench_multiuser.sh`, REPS=2, same binary: on vs `LLAMA_KV_ROWS_DISABLE=1`, cooled below 60C, Grade A):
+- Multi-user A/B (`gfx906/scripts/bench_multiuser.sh`, REPS=2, same binary: on vs `LLAMA_KV_ROWS_DISABLE=1`, cooled below 60C, Grade A):
 
 | Model | `kv_rows` | PP t/s (4x16K) | 4-way TG t/s | Change |
 | --- | --- | ---: | ---: | --- |
@@ -580,7 +580,7 @@ Flash Next 2-slot MTP3 server ubatch/pool sweep (draft ROCm1, split 0.52/0.48):
 
 ### 2026-11-10 Upstream `aa75ff323` merge (`0f7ce1b04`), Token Budget, B1 MoE Routing, Router Smoke, and Experiments
 
-Major profiling and experimentation day on merged tree `0f7ce1b04` (upstream `aa75ff323`). Archived origins: `vr/TOKEN-BUDGET.md`, `vr/token-budget-columns.csv`, `vr/README.md`, `old-ignore/2026-11-10/{play-b1,exp-spec,exp-q3,exp-p3,exp-q1,play-a7,play-tb1}/`.
+Major profiling and experimentation day on merged tree `0f7ce1b04` (upstream `aa75ff323`). Archived origins: `gfx906/TOKEN-BUDGET.md`, `gfx906/token-budget-columns.csv`, `gfx906/README.md`, `old-ignore/2026-11-10/{play-b1,exp-spec,exp-q3,exp-p3,exp-q1,play-a7,play-tb1}/`.
 
 #### A. B1: One-wave MoE routing kernel `topk_moe_wave_cuda<512,10>` (LANDED, Grade A)
 
@@ -661,9 +661,9 @@ Builds: `build-exp-q3` (`246887e7bebf / d67316b02bbe`) for 27B@0 TG; `build-exp-
   - G4@0: GEMM 1083.9 / 1266.1, FA 170.3 / 204.3, AR exposed 178.5 / 58.3, busy 1529.6 / 1637.5.
   - FN@32K: GEMM 987.9 / 1020.0, FA 437.9 / 532.9, AR exposed 114.5 / 87.6, busy 1868.7 / 1991.7.
 
-#### C. Router-mode server smoke test (`vr/server/serve.sh`, 2026-11-10, Grade B)
+#### C. Router-mode server smoke test (`gfx906/server/serve.sh`, 2026-11-10, Grade B)
 
-One 96-token reply per preset switching on the fly via `vr/server/models.ini`: `qwen27b` (MTP2) **51 t/s**, `qwen27b-dflash` (DFlash5) **61 t/s**, `flashnext` (MTP3, 100K) **48 t/s**, `gemma4` **32 t/s**.
+One 96-token reply per preset switching on the fly via `gfx906/server/models.ini`: `qwen27b` (MTP2) **51 t/s**, `qwen27b-dflash` (DFlash5) **61 t/s**, `flashnext` (MTP3, 100K) **48 t/s**, `gemma4` **32 t/s**.
 
 #### D. `exp-spec`: Merge validation & upstream speculative device-row paths (2026-11-10)
 
@@ -972,7 +972,7 @@ Archived origins: `old-ignore/2026-10-25/{flashnext-fast/README.md,2026-10-25-qw
   - Both flags off: mean PP 575.8, mean TG **52.60** (52.3-52.9), 2 runs.
   - Both flags on: mean PP 577.0, mean TG **53.30** (53.3-53.3), 2 runs (identical text across all 4 MTP2 runs).
   - Plain decode, both flags on: PP 585.0, TG **35.60** (1 run). Original binary checks: plain 34.7 TG, MTP2 48.7 TG.
-- Unit checks: 18/18 canonical IQ2_S/IQ4_NL CPU-ref cases + 24/24 repacked IQ4_NL CPU-ref cases (`vr-test-flashnext-moe`, max NMSE < 1.1e-14) passed. Grouped MoE accepted for integration (2026-10-29) and made default (2026-11-06); GPU feedback left experimental.
+- Unit checks: 18/18 canonical IQ2_S/IQ4_NL CPU-ref cases + 24/24 repacked IQ4_NL CPU-ref cases (`gfx906-test-flashnext-moe`, max NMSE < 1.1e-14) passed. Grouped MoE accepted for integration (2026-10-29) and made default (2026-11-06); GPU feedback left experimental.
 
 #### B. Flash Next 100K capacity, Strata comparison, and matched MTP2 check
 
@@ -1139,7 +1139,7 @@ Archived origins: `old-ignore/undated/legacy/RESULTS.md`, `old-ignore/2026-09-10
 | Afternoon isolation: fresh default control (fallback AR) | 325.4868 | 18.6829 | Control before guard fix |
 | **W01: HIP overlap-only guard removed (11 lines); generic AR active** | **394.1701** | **25.8895** | **+21.10% PP, +38.57% TG** (5.196 s PP, 9.888 s TG) |
 
-- Proof of execution: TG32 trace showed zero `ggml_cuda_ar` launches before the 11-line guard removal; after removal, `vr-test-gfx906-tp --n 1 --check` recorded four `ggml_cuda_ar_kernel<float, __hip_bfloat16>` launches, and `--n 2048 --check` passed in 67,643 us (vs 81,601 us before; n=1 before was 38,351 us).
+- Proof of execution: TG32 trace showed zero `ggml_cuda_ar` launches before the 11-line guard removal; after removal, `gfx906-test-tp --n 1 --check` recorded four `ggml_cuda_ar_kernel<float, __hip_bfloat16>` launches, and `--n 2048 --check` passed in 67,643 us (vs 81,601 us before; n=1 before was 38,351 us).
 - 64K winner gate (pre-guard-fix PR 27825 arm): depth 16384 `325.7131 / 18.7649` -> depth 65536 **216.0927 PP (-33.65%) / 16.2924 TG (-13.17%)** (fit on 2x 32 GB MI60).
 
 #### B. Muse-Glimmer-30B Q8_0 and Gemma-4-31B-it Q8_0 JSONL runs (2026-09-10 23:34-23:42Z)
@@ -1159,13 +1159,13 @@ Protocol: 2x gfx906 `-sm tensor`, `-fa on`, F16 KV, `-b/-ub 4096`, `-t 4`, depth
 ### 2026-09-01 Upstream `0eadefebd` + MX `63ed8cd1a` merge validation
 
 Archived origin: `old-ignore/undated/legacy/MERGE_2026-09-01.md`.
-Build: Release, HIP gfx906, RCCL ON, `GGML_CCACHE=OFF`, `GGML_NATIVE=ON`, `LLAMA_BUILD_VR_EXPERIMENTS=ON`.
+Build: Release, HIP gfx906, RCCL ON, `GGML_CCACHE=OFF`, `GGML_NATIVE=ON`, `LLAMA_BUILD_GFX906_TESTS=ON`.
 
 - **Qwen3.8-27B Q8_0** (`-sm tensor`, DirectIO, internal AR, BF16 overlap, `-b 2048`, `-c 16384`, `flake.nix` CLI): Prompt **320.0 t/s**, Generation **11.3 t/s**.
 - **Qwen3.8 Flash-Next (`qwen4exp A3B`) UD-IQ3_XXS** (first recorded run; 76.32 GiB file, 26.82 GiB lazy-mapped PLE, ~50.2 GiB resident GPU buffers; `-sm layer`, lazy DirectIO, `-b 2048`, depth 4096):
   - `PP512`: **175.811 t/s**; `TG128`: **23.297 t/s**; `PP2048`: **223.366 t/s**; `TG512`: **23.436 t/s**.
   - `flake.nix` CLI smoke test: **223.7 PP / 23.2 TG**.
-- **Q8 overlap harness (`vr-test-gfx906-tp`) fixed-slab & slab-size sweep**:
+- **Q8 overlap harness (`gfx906-test-tp`) fixed-slab & slab-size sweep**:
   - Fixed 1024-col slabs: `n=1` off F32 pass 49.744 ms; `n=2048` off F32 pass 73.855 ms; `n=2048` on F32 pass 53.248 ms; `n=2048` on BF16 pass **41.861 ms**.
   - Experimental compute-slab knob (rejected): 512 cols BF16 pass 42.469 ms; 256 cols incorrect output; 2048 cols illegal GPU memory access.
 - CTest note: multi-GPU `test-llama-archs` hit RCCL `ncclGroupEnd()` failure; single-GPU `HIP_VISIBLE_DEVICES=0` passed in 66.66 s.

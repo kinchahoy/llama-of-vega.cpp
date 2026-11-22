@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# usage: vr/server/serve.sh [extra llama-server args]
+# usage: gfx906/server/serve.sh [extra llama-server args]
 # Router llama-server with the presets in models.local.ini (if present) or models.ini.
 # Env: BUILD (default: <repo>/build-current), MODELS_PRESET, THEROCK_ENV, HOST (0.0.0.0), PORT (8080).
 # build-current and build-previous are symlinks to real build dirs (never rename a build dir: its RUNPATH is absolute).

@@ -15,8 +15,8 @@ printf 'Write a Python function that parses an ISO 8601 duration string like P3D
 THEROCK_ENV=${THEROCK_ENV:-}
 if [ -n "$THEROCK_ENV" ] && [ -f "$THEROCK_ENV" ]; then
   source "$THEROCK_ENV"
-elif [ -f "$REPO/vr/server/env.local.sh" ]; then
-  source "$REPO/vr/server/env.local.sh"
+elif [ -f "$REPO/gfx906/server/env.local.sh" ]; then
+  source "$REPO/gfx906/server/env.local.sh"
 fi
 set +e +u
 unset GGML_CUDA_PEER_AR GGML_CUDA_TP_OVERLAP GGML_CUDA_FLASHNEXT_MOE
