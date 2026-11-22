@@ -342,10 +342,10 @@ ggml_tensor * llama_model_inkling2::graph::build_inputs() {
     attn = inp->get_attn();
     recr = inp->get_recr();
 
-    // LLAMA_INKLING_BANDED_ATTN=1 enables the banded kernel, off by default: slower than the dense bias on gfx906
+    // LLAMA_INKLING_BANDED_ATTN=0 restores the dense bias for prefill
     static const bool banded_attn = [] {
         const char * env = getenv("LLAMA_INKLING_BANDED_ATTN");
-        return env != nullptr && atoi(env) != 0;
+        return env == nullptr || atoi(env) != 0;
     }();
 
     // banded FA needs a position-contiguous cache; small ubatches stay dense for graph reuse
