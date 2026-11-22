@@ -39,6 +39,41 @@ Measured on **2x gfx906 (MI60 + MI50)**, TheRock ROCm, F16 KV cache (no KV quant
 - Tested primarily on **gfx906 (MI50 / MI60)** with TheRock ROCm (`-DGGML_HIP_RCCL=OFF`). Wave32/NVIDIA/RDNA guards are in place for `DSV4_HC_MIX`, and `SGEMM_F32` is gated to GCN, but non-gfx906 targets are not regularly benchmarked here.
 - **Open high-leverage gaps** tracked in [gfx906/PERFORMANCE.md](gfx906/PERFORMANCE.md): long-context QSA tile skipping & 6:1 GQA head grouping (`G1`) at 32K-100K, the `>8` token cliff for 4-slot + speculative verify (`MU1(b)`), Inkling PP4K+ SWA ring-wrap fallback & `flash_attn_tile<128,128,64>` register spill, and Q8-reference KLD check for `SGEMM_F32` (`P4`).
 
+## ROCm / TheRock toolchain setup (gfx906)
+
+Standard distribution ROCm packages have dropped or degraded legacy `gfx906` (MI50 / MI60) support. This fork is built and tested using AMD's **TheRock** nightly Python SDK wheels (`rocm 10.3.0a20261110`, AMD Clang 24.0.0) in a standalone Python virtual environment on Linux (`7.0.0` in-tree `amdgpu` kernel driver, no system-wide ROCm install required):
+
+```bash
+# 1. Create a Python >= 3.13 venv and install TheRock ROCm SDK with gfx906 device libraries
+#    (tested with 10.3.0a20261110; omit ==10.3.0a20261110 to track the latest nightly)
+python3 -m venv therock-venv
+source therock-venv/bin/activate
+pip install --pre --index-url https://nightly.repo.amd.com/rocm/whl-next/ \
+  "rocm[devel,device-gfx906,libraries]==10.3.0a20261110" \
+  rocm-sdk-core==10.3.0a20261110 \
+  rocm-sdk-devel==10.3.0a20261110 \
+  rocm-sdk-libraries==10.3.0a20261110 \
+  rocm-sdk-device-gfx906==10.3.0a20261110
+```
+
+Save an environment helper (e.g. `therock.sh`) and source it before building or running (or point `THEROCK_ENV=/path/to/therock.sh` when using `gfx906/server/serve.sh`):
+
+```bash
+#!/usr/bin/env bash
+source /path/to/therock-venv/bin/activate
+export ROCM_PATH="$(rocm-sdk path --root)"
+export HIP_PATH="${ROCM_PATH}"
+export HIP_PLATFORM=amd
+export HIP_DEVICE_LIB_PATH="${ROCM_PATH}/amdgcn/bitcode"
+export CMAKE_HIP_ARCHITECTURES=gfx906
+export ROCBLAS_USE_HIPBLASLT=0
+export CMAKE_PREFIX_PATH="${ROCM_PATH}:${CMAKE_PREFIX_PATH:-}"
+export PATH="${ROCM_PATH}/bin:${ROCM_PATH}/llvm/bin:${PATH}"
+export LD_LIBRARY_PATH="${ROCM_PATH}/lib:${ROCM_PATH}/lib64:${ROCM_PATH}/llvm/lib:${LD_LIBRARY_PATH:-}"
+```
+
+Verify the toolchain sees `gfx906` before compiling: `rocm-sdk version` (`10.3.0a20261110`) and `rocm-sdk targets | grep gfx906`.
+
 ## Build & documentation
 
 ```bash
