@@ -277,6 +277,44 @@ With 10 uniform picks, the busier GPU averages 6.23 whole experts against today'
 
 Newest first. Full commands, identities and raw data are in the linked [old-ignore](old-ignore/README.md) folders.
 
+### 2026-11-21 Inkling 2 Mini, late: NVFP4 repacked experts, banded prefill attention, faster mix kernels
+
+In plain words: the exact NVFP4 file now runs at 836 t/s prompt and 45.8 t/s generation on one GPU (490.8 / 30.5 this afternoon), close to the IQ4_NL file, and long prompts need 5.5 GB less memory. 27B and Flash Next did not change. Code on top of the record below: `06aa25f25` + `d37d86dd7` + `2162c74dd` (banded relative-bias attention, port of unsloth #386 plus a tile-kernel path for gfx906, default on for prefill), `a99a7930b` (wide-block `res_mix` / `rms_norm_cat`), `0ba4be7f1` (NVFP4 experts on the repacked path). Old build `build-u1sort-20261121` (`400989a0d`), new build `build-inkling-final-20261121` (`0ba4be7f1`). `llama-bench -r 2`, order old, new, new, old, below 60C; raw data in `build-inkling-final-20261121/validation/final/`, script [final_validation_2.sh](investigation-notes/2026-11-21-inkling2-mini/final_validation_2.sh). How the wins were found and what is left for each model: [launch-floor-playbook.md](launch-floor-playbook.md).
+
+| Model | Config | PP2048 old | PP2048 new | TG128 old | TG128 new |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 27B Q8_0 | 2 GPUs, `-sm tensor`, ub 512 | 613.5 | 614.5 (+0.2%) | 37.14 | 37.21 (+0.2%) |
+| Flash Next UD-IQ3_XXS | 2 GPUs, `-sm tensor`, ub 512 | 655.0 | 657.7 (+0.4%) | 49.90 | 50.18 (+0.6%) |
+| Inkling 2 Mini IQ4_NL | ROCm0, ub 512 | 564.2 | 878.6 (+55.7%) | 36.28 | 47.75 (+31.6%) |
+| Inkling 2 Mini Q8_0 | ROCm0, ub 512 (1 run each) | 566.1 | 880.1 (+55.5%) | 34.47 | 44.41 (+28.8%) |
+| Inkling 2 Mini NVFP4 + Q8_0 | ROCm0, ub 512 | 490.8 (a) | 836.3 (+70.4%) | 30.5 (a) | 45.80 (+50.2%) |
+
+(a) merge-only build `build-catchup-20261121-e6d6`; the old build cannot run NVFP4. PP2048 at `-ub 2048`, new build: IQ4_NL 1137.7 (old 578.1), Q8_0 1137.3 (old 575.9), NVFP4 1081.1 (merge-only 509.7).
+
+Per change, same binary or two builds, alternated:
+
+| Change | File | PP2048 | TG128 |
+| --- | --- | ---: | ---: |
+| Wide-block `res_mix_f32` / `rms_norm_cat_f32` (26.7 and 11 us per call before) | IQ4_NL | 771.1 / 776.9 | 43.57 / 47.73 (+9.5%) |
+| Banded bias, unsloth scalar kernels only (first port) | IQ4_NL | 761 / 383 (-50%) | 47.3 / 47.5 |
+| Banded bias in the tile kernel, ub 512 | IQ4_NL | 775.4 / 879.6 (+13.4%) | 47.7 / 47.7 |
+| Banded bias in the tile kernel, ub 2048 | IQ4_NL | 772.9 / 1135.7 (+47%) | - |
+| NVFP4 experts repacked (`GGML_CUDA_REPACK_NVFP4=0` / default), ub 512 | NVFP4 | 637.8 / 737.3 (+15.6%) | 37.9 / 45.5 (+20%) |
+
+Banded attention at 16K context (`llama-batched-bench -npp 16384 -ub 2048`): PP 576.5 / 686.9, TG 34.3 / 34.6, compute buffer 8,665 / 3,170 MiB. Small ubatches (token generation) stay on the dense bias; this is why TG does not change and why TG falls with context (36.4 t/s at 4K context against 45.8 at an empty one).
+
+Tried, this approach did not work as a default: the unsloth banded kernels alone. Their fast prefill kernel needs NVIDIA matrix units; on gfx906 only the scalar kernels run and PP halves. They stay as the fallback (decode shapes, quantized K/V, kv_rows); the gfx906 path adds the bias lookup inside `flash_attn_tile`.
+
+Quality (NVFP4 file, `llama-perplexity -c 4096 --chunks 2`, KLD against the first run): the same config twice gives KLD 0 (deterministic). Dense ub 512 vs dense ub 2048: mean KLD 0.0049, same top token 97.8%. Banded vs dense: 0.0055 (ub 512), 0.0060 (ub 2048), 0.0054 (ub 96), same top 97.0-97.6%. NVFP4 repacked vs generic kernels: 0.0054, same top 97.2%, PPL ratio 0.9997 +/- 0.0019. So every change sits at the level this model already moves when only the batch size changes. Open: why a pure batching change moves this model that much (guess: near-tie flips in the top-8 of 128 expert routing). PPL over 8 chunks, dense / banded: IQ4_NL 2.8307 / 2.8305 (ub 512), 2.8288 / 2.8283 (ub 2048); NVFP4 2.8210 / 2.8261; Q8_0 dense 2.8268.
+
+`test-backend-ops` on ROCm0: MUL_MAT 2727/2727, MUL_MAT_ID 1162/1162, FLASH_ATTN_EXT 4420/4420, FLASH_ATTN_EXT_BANDED 71/71, CLIP_ROWS 9/9, RES_MIX 9/9, LOOP_GATE 3/3, RMS_NORM_CAT 6/6, SCONV_RES 12/12. Gap: the harness does not allocate the repack buffer type, so the NVFP4 repacked kernels are covered only by the model-level checks above. Known old failure, not from this work: generic NVFP4 (also Q2_K, Q3_K) MUL_MAT_ID with one token and 2 used experts.
+
+NVFP4 repack memory: ROCm0 weights 16,320 MiB generic, 17,625 MiB repacked (+1,305 MiB): two decoded F16 scales per 32 values against 1 byte per 16 in the file. Untried: keep the raw UE4M3 bytes and decode in the kernel (VRAM-neutral).
+
+NVFP4 server and multi-user, new build, ROCm0: `llama-server` with mmproj Q8_0, `-c 16384`: text TG 37.1 t/s (was 30.4), image request PP 460.0 (was 389.5), TG 35.0, server stays up. `llama-batched-bench -npp 4096 -npl 1,2,4 -ub 2048`: NVFP4 PP 991 / 746 / 559, aggregate TG 36.4 / 51.0 / 87.7; IQ4_NL PP 1032 / 768 / 570, TG 37.5 / 53.5 / 97.1 (IQ4_NL on the old build: PP 507 / 429 / 378, TG 30.6 / 44.7 / 79.2). CPU check (`--device none -ngl 0`) ends without an assert.
+
+Cost model check: steady-state token generation is 98% GPU-busy with kernels back to back; a launch costs about 2.2 us in the app (2.0 us bare on the MI60, 2.6 us on the MI50; `rocprofv3` shows 4.2 us). Captured graphs are active for this model. See the playbook.
+
 ### 2026-11-21 Inkling 2 Mini: crash fix, fused ops, NVFP4 baseline
 
 In plain words: Inkling 2 Mini no longer crashes on images, runs about 37% faster on prompts and 19% faster on generation, and now has an exact NVFP4 file. 27B and Flash Next did not change. Code: upstream `e6d624b9a` merged (`4c5738580`), crash fix `ddca7dd9b`, fused ops `3253927e4`, `b6c927fd1`, `f17889023`, `85bb8a0f7`. Old build `build-u1sort-20261121` (`400989a0d`), new build `build-sconvfuse-20261121` (`85bb8a0f7`). `llama-bench -r 2`, order old, new, new, old, start temperature below 60C; raw data in `build-sconvfuse-20261121/validation/final/`, script [final_validation.sh](investigation-notes/2026-11-21-inkling2-mini/final_validation.sh).
