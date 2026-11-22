@@ -12660,6 +12660,46 @@ void ggml_compute_forward_rms_norm_cat(
     }
 }
 
+// ggml_compute_forward_sconv_res
+
+void ggml_compute_forward_sconv_res(
+        const ggml_compute_params * params,
+        ggml_tensor * dst) {
+    const ggml_tensor * x       = dst->src[0];
+    const ggml_tensor * weight  = dst->src[1];
+    const ggml_tensor * cur     = dst->src[2];
+    const ggml_tensor * dynamic = dst->src[3];
+
+    const int64_t n_conv       = weight->ne[0];
+    const int64_t n_channels   = dst->ne[0];
+    const int64_t n_tokens     = dst->ne[1];
+    const int64_t n_seq_tokens = n_tokens/x->ne[2];
+    const int64_t n_heads      = dynamic ? dynamic->ne[0]/n_conv : 1;
+    float scale;
+    memcpy(&scale, dst->op_params, sizeof(scale));
+
+    for (int64_t tok = params->ith; tok < n_tokens; tok += params->nth) {
+        const int64_t s = tok/n_seq_tokens;
+        const int64_t t = tok%n_seq_tokens;
+        for (int64_t c = 0; c < n_channels; ++c) {
+            const float * xc = (const float *) x->data + (s*n_channels + c)*x->ne[0] + t;
+            const float * w  = (const float *) weight->data + c*n_conv;
+            float conv = 0.0f;
+            for (int64_t j = 0; j < n_conv; ++j) {
+                conv += xc[j]*w[j];
+            }
+            float acc = ((const float *) cur->data)[tok*n_channels + c] + conv;
+            if (dynamic) {
+                const float * d = (const float *) dynamic->data + tok*dynamic->ne[0] + (c/(n_channels/n_heads))*n_conv;
+                for (int64_t lag = 0; lag < n_conv; ++lag) {
+                    acc += xc[n_conv - 1 - lag]*d[lag];
+                }
+            }
+            ((float *) dst->data)[tok*n_channels + c] = acc*scale;
+        }
+    }
+}
+
 // ggml_compute_forward_dsv4_hc_mix
 
 // Q8_0 weights are dotted with the activation quantized to int8 per 32 values, like mul_mat does

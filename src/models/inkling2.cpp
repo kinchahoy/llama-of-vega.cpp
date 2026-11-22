@@ -239,6 +239,18 @@ ggml_tensor * llama_model_inkling2::graph::convolve(
 
     build_conv_state_store(inp, state, x, n_conv - 1, offset*(n_conv - 1)*ggml_element_size(state));
 
+    // LLAMA_INKLING_SCONV_FUSED=0 restores the old chain
+    static const bool sconv_fused = [] {
+        const char * env = getenv("LLAMA_INKLING_SCONV_FUSED");
+        return env == nullptr || atoi(env) != 0;
+    }();
+    const float scale = 1.0f/sqrtf((dynamic ? 2 : 1)*n_conv + 1);
+
+    if (sconv_fused && n_conv == 4 && x->type == GGML_TYPE_F32 && weight->type == GGML_TYPE_F32 && cur->type == GGML_TYPE_F32 && ggml_is_contiguous(x) && ggml_is_contiguous(weight) &&
+            ggml_is_contiguous(cur) && (!dynamic || (dynamic->type == GGML_TYPE_F32 && ggml_is_contiguous(dynamic)))) {
+        return ggml_sconv_res(ctx0, x, weight, cur, dynamic, scale);
+    }
+
     ggml_tensor * out = ggml_ssm_conv(ctx0, x, weight);
     out = ggml_reshape_2d(ctx0, out, n_channels, n_tokens);
 
@@ -260,7 +272,7 @@ ggml_tensor * llama_model_inkling2::graph::convolve(
         }
     }
 
-    return ggml_scale(ctx0, ggml_add(ctx0, cur, out), 1.0f/sqrtf((dynamic ? 2 : 1)*n_conv + 1));
+    return ggml_scale(ctx0, ggml_add(ctx0, cur, out), scale);
 }
 
 // mix a cross-pass message into a looped layer input: (1 - forget)*cur + gain*message, both gated on cur and message

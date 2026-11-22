@@ -110,6 +110,7 @@ void ggml_compute_forward_clip_rows(const struct ggml_compute_params * params, s
 void ggml_compute_forward_res_mix(const struct ggml_compute_params * params, struct ggml_tensor * dst);
 void ggml_compute_forward_loop_gate(const struct ggml_compute_params * params, struct ggml_tensor * dst);
 void ggml_compute_forward_rms_norm_cat(const struct ggml_compute_params * params, struct ggml_tensor * dst);
+void ggml_compute_forward_sconv_res(const struct ggml_compute_params * params, struct ggml_tensor * dst);
 void ggml_compute_forward_dsv4_hc_mix(const struct ggml_compute_params * params, struct ggml_tensor * dst);
 void ggml_compute_forward_dsv4_hc_post(const struct ggml_compute_params * params, struct ggml_tensor * dst);
 void ggml_compute_forward_top_k_mask(const struct ggml_compute_params * params, struct ggml_tensor * dst);

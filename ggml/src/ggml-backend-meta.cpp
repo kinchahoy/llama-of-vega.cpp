@@ -1505,6 +1505,7 @@ static struct ggml_backend_meta_split_state ggml_backend_meta_get_split_state(
             case GGML_OP_RES_MIX:
             case GGML_OP_LOOP_GATE:
             case GGML_OP_RMS_NORM_CAT:
+            case GGML_OP_SCONV_RES:
             case GGML_OP_TOP_K_MASK: {
                 // DeepSeek-V4 custom attention ops. Replicated under design A (mirrored in, mirrored out).
                 split_state = handle_generic(src_ss, /*scalar_only =*/ true);

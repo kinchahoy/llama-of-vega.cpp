@@ -1103,6 +1103,7 @@ static const char * GGML_OP_NAME[GGML_OP_COUNT] = {
     "RES_MIX",
     "LOOP_GATE",
     "RMS_NORM_CAT",
+    "SCONV_RES",
     "TOP_K_MASK",
 
     "UNARY",
@@ -1123,7 +1124,7 @@ static const char * GGML_OP_NAME[GGML_OP_COUNT] = {
     "SLEEP",
 };
 
-static_assert(GGML_OP_COUNT == 105, "GGML_OP_COUNT != 105");
+static_assert(GGML_OP_COUNT == 106, "GGML_OP_COUNT != 106");
 
 static const char * GGML_OP_SYMBOL[GGML_OP_COUNT] = {
     "none",
@@ -1223,6 +1224,7 @@ static const char * GGML_OP_SYMBOL[GGML_OP_COUNT] = {
     "res_mix(query, states...)",
     "loop_gate(cur, message, gain, forget)",
     "rms_norm_cat(a, b)",
+    "sconv_res(x, weight, cur, dynamic)",
     "top_k_mask(mask, top_k, score, blocks, extra)",
 
     "unary(x)",
@@ -1243,7 +1245,7 @@ static const char * GGML_OP_SYMBOL[GGML_OP_COUNT] = {
     "sleep(x)",
 };
 
-static_assert(GGML_OP_COUNT == 105, "GGML_OP_COUNT != 105");
+static_assert(GGML_OP_COUNT == 106, "GGML_OP_COUNT != 106");
 
 static_assert(GGML_OP_POOL_COUNT == 2, "GGML_OP_POOL_COUNT != 2");
 
@@ -6655,6 +6657,32 @@ struct ggml_tensor * ggml_rms_norm_cat(
     result->src[0] = a;
     result->src[1] = b;
     ggml_set_op_params(result, &eps, sizeof(eps));
+
+    return result;
+}
+
+// ggml_sconv_res
+
+struct ggml_tensor * ggml_sconv_res(
+        struct ggml_context * ctx,
+        struct ggml_tensor  * x,
+        struct ggml_tensor  * weight,
+        struct ggml_tensor  * cur,
+        struct ggml_tensor  * dynamic,
+        float                 scale) {
+    GGML_ASSERT(x->type == GGML_TYPE_F32 && weight->type == GGML_TYPE_F32 && cur->type == GGML_TYPE_F32);
+    GGML_ASSERT(cur->ne[0] == x->ne[1] && cur->ne[0] == weight->ne[1] && x->ne[0] >= weight->ne[0]);
+    GGML_ASSERT(cur->ne[1] == (x->ne[0] - weight->ne[0] + 1)*x->ne[2]);
+    GGML_ASSERT(!dynamic || (dynamic->type == GGML_TYPE_F32 && dynamic->ne[1] == cur->ne[1] && dynamic->ne[0] % weight->ne[0] == 0 && cur->ne[0] % (dynamic->ne[0]/weight->ne[0]) == 0));
+
+    struct ggml_tensor * result = ggml_dup_tensor(ctx, cur);
+
+    result->op     = GGML_OP_SCONV_RES;
+    result->src[0] = x;
+    result->src[1] = weight;
+    result->src[2] = cur;
+    result->src[3] = dynamic;
+    ggml_set_op_params(result, &scale, sizeof(scale));
 
     return result;
 }

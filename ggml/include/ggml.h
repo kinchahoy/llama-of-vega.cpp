@@ -419,6 +419,7 @@ extern "C" {
         GGML_OP_RES_MIX,
         GGML_OP_LOOP_GATE,
         GGML_OP_RMS_NORM_CAT,
+        GGML_OP_SCONV_RES,
         GGML_OP_TOP_K_MASK,
 
         GGML_OP_UNARY,
@@ -2536,6 +2537,16 @@ extern "C" {
             struct ggml_tensor  * a,
             struct ggml_tensor  * b,
             float                 eps);
+
+    // sconv_res: (cur + ssm_conv(x, weight) + dynamic taps)*scale -> shape of cur [n_channels, n_tokens]
+    //            x [n_conv - 1 + n_seq_tokens, n_channels, n_seqs], weight [n_conv, n_channels], dynamic [n_conv*n_heads, n_tokens] or NULL
+    GGML_API struct ggml_tensor * ggml_sconv_res(
+            struct ggml_context * ctx,
+            struct ggml_tensor  * x,
+            struct ggml_tensor  * weight,
+            struct ggml_tensor  * cur,
+            struct ggml_tensor  * dynamic,
+            float                 scale);
 
     // hc_post: x [n_embd, n_tokens], residual [n_embd, hc, n_tokens],
     //          post [hc, n_tokens], comb [dst_hc, src_hc, n_tokens]

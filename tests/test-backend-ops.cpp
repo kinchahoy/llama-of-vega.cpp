@@ -4978,6 +4978,37 @@ struct test_rms_norm_cat : public test_case {
     }
 };
 
+struct test_sconv_res : public test_case {
+    const int64_t n_channels;
+    const int64_t n_heads;
+    const int64_t n_seq_tokens;
+    const int64_t n_seqs;
+    const bool dynamic;
+
+    std::string op_desc(ggml_tensor * t) override {
+        GGML_UNUSED(t);
+        return "SCONV_RES";
+    }
+
+    std::string vars() override {
+        return VARS_TO_STR5(n_channels, n_heads, n_seq_tokens, n_seqs, dynamic);
+    }
+
+    test_sconv_res(int64_t n_channels = 512, int64_t n_heads = 8, int64_t n_seq_tokens = 5, int64_t n_seqs = 1, bool dynamic = true)
+        : n_channels(n_channels), n_heads(n_heads), n_seq_tokens(n_seq_tokens), n_seqs(n_seqs), dynamic(dynamic) {}
+
+    ggml_tensor * build_graph(ggml_context * ctx) override {
+        const int64_t n_conv = 4;
+        ggml_tensor * x      = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, n_conv - 1 + n_seq_tokens, n_channels, n_seqs);
+        ggml_tensor * weight = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, n_conv, n_channels);
+        ggml_tensor * cur    = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, n_channels, n_seq_tokens*n_seqs);
+        ggml_tensor * dyn    = dynamic ? ggml_new_tensor_2d(ctx, GGML_TYPE_F32, n_conv*n_heads, n_seq_tokens*n_seqs) : nullptr;
+        ggml_tensor * out = ggml_sconv_res(ctx, x, weight, cur, dyn, 1.0f/sqrtf(dynamic ? 9.0f : 5.0f));
+        ggml_set_name(out, "out");
+        return out;
+    }
+};
+
 struct test_dsv4_hc_mix : public test_dsv4_hc {
     const int64_t n_embd;
     const int64_t n_lo;
@@ -11061,6 +11092,12 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
         test_cases.emplace_back(new test_loop_gate(2304, nt));
         test_cases.emplace_back(new test_rms_norm_cat(2304, nt));
         test_cases.emplace_back(new test_rms_norm_cat(100, nt));
+    }
+    for (int64_t nst : {1, 5, 512}) {
+        for (int64_t ns : {1, 2}) {
+            test_cases.emplace_back(new test_sconv_res(512, 8, nst, ns, true));
+            test_cases.emplace_back(new test_sconv_res(512, 8, nst, ns, false));
+        }
     }
     for (int64_t nt : {1, 2, 3, 4, 5, 8}) {
         test_cases.emplace_back(new test_dsv4_hc_mix(512, 64, nt));
