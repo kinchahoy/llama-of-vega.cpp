@@ -2,12 +2,12 @@
 
 **Status datestamp: 2026-11-22** | Upstream base: [`ggml-org/llama.cpp` `e6d624b9a` (`b12623`)](https://github.com/ggml-org/llama.cpp/commit/e6d624b9a)
 
-<!-- Human overview & scope setting goes here -->
+_Human-drafted_
 
 ## Design goals & quality focus
 
 Agent optimized llama.cpp (and Unsloth llama.cpp) fork with many optimizations focused on a relatively narrow set of frontier open models that can run on 2x32GB. 
-It's hyper optimized for a pair of MI60 and MI50 Radeon datacenter cards with incredibly fast memory (HBM1) but fairly dated compute (no tensor cores etc.). I use this stack regularly and it's surprisingly power and cost effective for local inferencing.
+It's hyper optimized for a pair of MI60 and MI50 Radeon datacenter cards with incredibly fast memory (HBM2) but fairly dated compute (no tensor cores etc.). I use this stack regularly and it's surprisingly power and cost effective for local inferencing.
 
 A few notes:
 - I care a fair bit about getting high quality inferencing results, so you won't see Strata style tricks to get fast tokens at the cost of accuracy (KV caches kept at FP16 typically, no experts ablated etc.)
@@ -15,7 +15,7 @@ A few notes:
 - My current server doesn't have a great PCI topology so I'm not optimizing for RCCL at this stage
 - The GPUs are power limited (170W for MI50, 220 for MI60)
 
-I've pulled a lot of optimization ideas from many gfx906 focused repos (I've tried to have agents attribute the sources below). The few original ideas here (if any) are around setting the focus and encouraging agents to rebalance compute onto the faster card and leverage the slower card for it's equally fast memory
+I've pulled a lot of optimization ideas from many gfx906 focused repos (I've tried to have agents attribute the sources below). The few original ideas here (if any) are around setting the focus and encouraging agents to rebalance compute onto the faster card and leverage the slower card for its equally fast memory
 
 _AI-drafted_
 
