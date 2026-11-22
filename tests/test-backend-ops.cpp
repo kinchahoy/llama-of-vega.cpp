@@ -4862,6 +4862,38 @@ struct test_dsv4_hc_pre : public test_dsv4_hc {
     }
 };
 
+struct test_clip_rows : public test_case {
+    const int64_t ne0;
+    const int64_t n_head;
+    const int64_t n_tokens;
+    const bool    has_scale;
+
+    std::string op_desc(ggml_tensor * t) override {
+        GGML_UNUSED(t);
+        return "CLIP_ROWS";
+    }
+
+    std::string vars() override {
+        return VARS_TO_STR4(ne0, n_head, n_tokens, has_scale);
+    }
+
+    test_clip_rows(int64_t ne0 = 128, int64_t n_head = 8, int64_t n_tokens = 5, bool has_scale = true)
+        : ne0(ne0), n_head(n_head), n_tokens(n_tokens), has_scale(has_scale) {}
+
+    ggml_tensor * build_graph(ggml_context * ctx) override {
+        ggml_tensor * a = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, ne0, n_head, n_tokens);
+        ggml_set_name(a, "a");
+        ggml_tensor * scale = nullptr;
+        if (has_scale) {
+            scale = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, ne0, n_head);
+            ggml_set_name(scale, "scale");
+        }
+        ggml_tensor * out = ggml_clip_rows(ctx, a, scale, 4.0f);
+        ggml_set_name(out, "out");
+        return out;
+    }
+};
+
 struct test_dsv4_hc_mix : public test_dsv4_hc {
     const int64_t n_embd;
     const int64_t n_lo;
@@ -10933,6 +10965,11 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
     test_cases.emplace_back(new test_dsv4_hc_pre(31, 4, 17));
     test_cases.emplace_back(new test_dsv4_hc_pre(128, 4, 257));
     test_cases.emplace_back(new test_dsv4_hc_pre(4096, 4, 21));
+    for (int64_t nt : {1, 5, 512}) {
+        test_cases.emplace_back(new test_clip_rows(128, 32, nt, true));
+        test_cases.emplace_back(new test_clip_rows(128, 8, nt, false));
+        test_cases.emplace_back(new test_clip_rows(16, 32, nt, true));
+    }
     for (int64_t nt : {1, 2, 3, 4, 5, 8}) {
         test_cases.emplace_back(new test_dsv4_hc_mix(512, 64, nt));
         test_cases.emplace_back(new test_dsv4_hc_mix(2560, 320, nt, GGML_TYPE_Q8_0));

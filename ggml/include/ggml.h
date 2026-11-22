@@ -415,6 +415,7 @@ extern "C" {
         GGML_OP_DSV4_HC_PRE,
         GGML_OP_DSV4_HC_POST,
         GGML_OP_DSV4_HC_MIX,
+        GGML_OP_CLIP_ROWS,
         GGML_OP_TOP_K_MASK,
 
         GGML_OP_UNARY,
@@ -2499,6 +2500,15 @@ extern "C" {
             struct ggml_tensor  * w_inject,
             struct ggml_tensor  * w_up,
             float                 eps);
+
+    // clip_rows: out = a*scale (optional, [ne0, ne1] broadcast over ne2), then each row along dim 0 is scaled down to an L2 norm of at most threshold
+    //   out = a*min(1, threshold/(sqrt(sum(a^2)) + 1e-6))
+    //
+    GGML_API struct ggml_tensor * ggml_clip_rows(
+            struct ggml_context * ctx,
+            struct ggml_tensor  * a,
+            struct ggml_tensor  * scale,
+            float                 threshold);
 
     // hc_post: x [n_embd, n_tokens], residual [n_embd, hc, n_tokens],
     //          post [hc, n_tokens], comb [dst_hc, src_hc, n_tokens]

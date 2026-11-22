@@ -163,6 +163,15 @@ std::unique_ptr<llm_graph_context> llama_model_inkling2::build_arch_graph(const 
 
 // scale each row down to an L2 norm of at most threshold, after the optional per-channel scale
 ggml_tensor * llama_model_inkling2::graph::clip(ggml_tensor * cur, ggml_tensor * scale, float threshold) {
+    // LLAMA_INKLING_CLIP_FUSED=0 restores the old chain
+    static const bool clip_fused = [] {
+        const char * env = getenv("LLAMA_INKLING_CLIP_FUSED");
+        return env == nullptr || atoi(env) != 0;
+    }();
+    if (clip_fused && cur->type == GGML_TYPE_F32 && ggml_is_contiguous(cur)) {
+        return ggml_clip_rows(ctx0, cur, scale, threshold);
+    }
+
     if (scale) {
         cur = ggml_mul(ctx0, cur, scale);
     }

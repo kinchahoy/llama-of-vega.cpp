@@ -12530,6 +12530,39 @@ void ggml_compute_forward_lightning_indexer(
     }
 }
 
+// ggml_compute_forward_clip_rows
+
+void ggml_compute_forward_clip_rows(
+        const ggml_compute_params * params,
+        ggml_tensor * dst) {
+    const ggml_tensor * a     = dst->src[0];
+    const ggml_tensor * scale = dst->src[1];
+
+    GGML_ASSERT(a->type == GGML_TYPE_F32 && ggml_is_contiguous(a));
+    GGML_ASSERT(scale == nullptr || (scale->type == GGML_TYPE_F32 && ggml_is_contiguous(scale)));
+
+    const int64_t ne0   = a->ne[0];
+    const int64_t nrows = ggml_nrows(a);
+
+    const float threshold = ggml_get_op_params_f32(dst, 0);
+
+    for (int64_t ir = params->ith; ir < nrows; ir += params->nth) {
+        const float * x = (const float *) a->data + ir*ne0;
+        const float * s = scale ? (const float *) scale->data + (ir % a->ne[1])*ne0 : nullptr;
+        float *       y = (float *) dst->data + ir*ne0;
+
+        float ss = 0.0f;
+        for (int64_t i = 0; i < ne0; ++i) {
+            const float v = s ? x[i]*s[i] : x[i];
+            ss += v*v;
+        }
+        const float factor = std::min(std::max(threshold/(sqrtf(ss) + 1e-6f), 0.0f), 1.0f);
+        for (int64_t i = 0; i < ne0; ++i) {
+            y[i] = (s ? x[i]*s[i] : x[i])*factor;
+        }
+    }
+}
+
 // ggml_compute_forward_dsv4_hc_mix
 
 // Q8_0 weights are dotted with the activation quantized to int8 per 32 values, like mul_mat does

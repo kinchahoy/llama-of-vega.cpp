@@ -1099,6 +1099,7 @@ static const char * GGML_OP_NAME[GGML_OP_COUNT] = {
     "DSV4_HC_PRE",
     "DSV4_HC_POST",
     "DSV4_HC_MIX",
+    "CLIP_ROWS",
     "TOP_K_MASK",
 
     "UNARY",
@@ -1119,7 +1120,7 @@ static const char * GGML_OP_NAME[GGML_OP_COUNT] = {
     "SLEEP",
 };
 
-static_assert(GGML_OP_COUNT == 101, "GGML_OP_COUNT != 101");
+static_assert(GGML_OP_COUNT == 102, "GGML_OP_COUNT != 102");
 
 static const char * GGML_OP_SYMBOL[GGML_OP_COUNT] = {
     "none",
@@ -1215,6 +1216,7 @@ static const char * GGML_OP_SYMBOL[GGML_OP_COUNT] = {
     "dsv4_hc_pre(x, weights)",
     "dsv4_hc_post(x, residual, post, comb)",
     "dsv4_hc_mix(x, w_norm, w_down, w_inject, w_up)",
+    "clip_rows(a, scale)",
     "top_k_mask(mask, top_k, score, blocks, extra)",
 
     "unary(x)",
@@ -1235,7 +1237,7 @@ static const char * GGML_OP_SYMBOL[GGML_OP_COUNT] = {
     "sleep(x)",
 };
 
-static_assert(GGML_OP_COUNT == 101, "GGML_OP_COUNT != 101");
+static_assert(GGML_OP_COUNT == 102, "GGML_OP_COUNT != 102");
 
 static_assert(GGML_OP_POOL_COUNT == 2, "GGML_OP_POOL_COUNT != 2");
 
@@ -6562,6 +6564,27 @@ struct ggml_tensor * ggml_dsv4_hc_mix(
     result->src[2] = w_down;
     result->src[3] = w_inject;
     result->src[4] = w_up;
+
+    return result;
+}
+
+// ggml_clip_rows
+
+struct ggml_tensor * ggml_clip_rows(
+        struct ggml_context * ctx,
+        struct ggml_tensor  * a,
+        struct ggml_tensor  * scale,
+        float                 threshold) {
+    GGML_ASSERT(a->type == GGML_TYPE_F32);
+    GGML_ASSERT(scale == NULL || (scale->type == GGML_TYPE_F32 && scale->ne[0] == a->ne[0] && scale->ne[1] == a->ne[1]));
+
+    struct ggml_tensor * result = ggml_dup_tensor(ctx, a);
+
+    ggml_set_op_params_f32(result, 0, threshold);
+
+    result->op     = GGML_OP_CLIP_ROWS;
+    result->src[0] = a;
+    result->src[1] = scale;
 
     return result;
 }
