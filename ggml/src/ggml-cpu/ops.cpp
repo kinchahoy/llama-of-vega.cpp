@@ -8855,6 +8855,30 @@ void ggml_compute_forward_top_k(
     }
 }
 
+static inline float ggml_flash_attn_ext_banded_load(
+        const ggml_tensor * rel,
+        int64_t iq1,
+        int64_t iq2,
+        int64_t iq3,
+        int64_t rel_idx) {
+    const char * ptr = (const char *) rel->data +
+        (size_t) rel_idx * rel->nb[0] +
+        (size_t) iq2    * rel->nb[1] +
+        (size_t) iq1    * rel->nb[2] +
+        (size_t) (iq3 % rel->ne[3]) * rel->nb[3];
+
+    switch (rel->type) {
+        case GGML_TYPE_F32:
+            return *(const float *) ptr;
+        case GGML_TYPE_F16:
+            return GGML_CPU_FP16_TO_FP32(*(const ggml_fp16_t *) ptr);
+        case GGML_TYPE_BF16:
+            return GGML_BF16_TO_FP32(*(const ggml_bf16_t *) ptr);
+        default:
+            GGML_ABORT("banded flash attention: unsupported rel_logits type");
+    }
+}
+
 static void ggml_compute_forward_flash_attn_ext_f16_one_chunk(
         const ggml_compute_params * params,
         ggml_tensor * dst,
@@ -8868,6 +8892,7 @@ static void ggml_compute_forward_flash_attn_ext_f16_one_chunk(
     const ggml_tensor * v     = dst->src[2];
     const ggml_tensor * mask  = dst->src[3];
     const ggml_tensor * sinks = dst->src[4];
+    const ggml_tensor * rel   = dst->src[6];
     const ggml_tensor * kv_rows = dst->src[5];
 
     GGML_TENSOR_LOCALS(int64_t, neq, q,   ne)
@@ -8999,6 +9024,14 @@ static void ggml_compute_forward_flash_attn_ext_f16_one_chunk(
                 s = logit_softcap*tanhf(s);
             }
 
+            if (rel) {
+                // the offset aligns a short decode Q block to the tail of K (FA4 seqlen_k - seqlen_q convention)
+                const int64_t rel_dist = iq1 + (nek1 - neq1) - ic;
+                if (rel_dist >= 0 && rel_dist < rel->ne[0]) {
+                    s += ggml_flash_attn_ext_banded_load(rel, iq1, iq2, iq3, rel_dist);
+                }
+            }
+
             s += mv; // apply mask
 
             const float Mold = M;
@@ -9036,7 +9069,8 @@ static void ggml_compute_forward_flash_attn_ext_f16_one_chunk(
 
         // sinks - apply only on the first kv-chunk
         if (sinks && ic_start == 0) {
-            const float s = ((float *)((char *) sinks->data))[h];
+            const float s = *(const float *)((const char *) sinks->data + h*sinks->nb[0] +
+                (sinks->ne[1] > 1 ? iq1*sinks->nb[1] : 0) + (sinks->ne[2] > 1 ? iq3*sinks->nb[2] : 0));
 
             float ms = 1.0f;
             float vs = 1.0f;
@@ -9553,7 +9587,7 @@ static void ggml_compute_forward_flash_attn_ext_f16(
         const int64_t dr = (nr + nchunk - 1) / nchunk;
 
         static constexpr int64_t Q_TILE_SZ  = ggml_fa_tile_config::Q;
-        bool use_tiled = !use_ref &&
+        bool use_tiled = !use_ref && dst->src[6] == nullptr &&
                                (q->type == GGML_TYPE_F32 &&
                                 kv_is_f32_or_f16 &&
                                 k->type == v->type &&

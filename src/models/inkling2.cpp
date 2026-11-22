@@ -1,6 +1,8 @@
 #include "models.h"
 #include "../llama-memory-hybrid-iswa.h"
 
+static constexpr int64_t n_tokens_banded_min = 32;
+
 void llama_model_inkling2::load_arch_hparams(llama_model_loader & ml) {
     ml.get_key(LLM_KV_ATTENTION_LAYERNORM_RMS_EPS, hparams.f_norm_rms_eps);
     ml.get_key(LLM_KV_ATTENTION_QK_CLIP,           hparams.f_qk_clip);
@@ -299,10 +301,58 @@ ggml_tensor * llama_model_inkling2::graph::control(ggml_tensor * cur, ggml_tenso
     return ggml_add(ctx0, ggml_sub(ctx0, cur, ggml_mul(ctx0, forget, cur)), ggml_mul(ctx0, gain, message));
 }
 
+bool llama_model_inkling2::graph::use_banded(int il, bool swa) {
+    const auto * cache = swa ? attn->mctx->get_swa() : attn->mctx->get_base();
+    const int64_t hd = hparams.n_embd_head_k(il);
+    // quantized K/V are converted to F16 by the kernel
+    const auto type_ok = [](ggml_type t) {
+        return t == GGML_TYPE_F32 || t == GGML_TYPE_F16 || t == GGML_TYPE_BF16 || ggml_is_quantized(t);
+    };
+    if (!(inp->n_kv_banded[swa] > 0 && (hd == 64 || hd == 128) && hparams.n_embd_head_v(il) == hd &&
+            type_ok(cache->type_k()) && type_ok(cache->type_v()) && !cache->get_k_scale(il) && !cache->get_v_scale(il) &&
+            (swa ? attn->self_attn_mask_swa.raw : attn->self_attn_mask.raw)->ne[3] == 1)) {
+        return false;
+    }
+    ggml_backend_dev_t dev = model.dev_layer(il);
+    if (!dev) {
+        return false;
+    }
+    for (const auto & [key, ok] : banded_dev_ok) {
+        if (key.first == swa && key.second == dev) {
+            return ok;
+        }
+    }
+    const int64_t nh  = hparams.n_head(il);
+    const int64_t nkv = hparams.n_head_kv(il);
+    ggml_tensor * pq = ggml_new_tensor_4d(ctx0, GGML_TYPE_F32, hd, 1, nh, 1);
+    ggml_tensor * pk = ggml_new_tensor_4d(ctx0, cache->type_k(), hd, 1, nkv, 1);
+    ggml_tensor * pv = ggml_new_tensor_4d(ctx0, cache->type_v(), hd, 1, nkv, 1);
+    ggml_tensor * pm = ggml_new_tensor_4d(ctx0, GGML_TYPE_F16, 1, 1, 1, 1);
+    ggml_tensor * pr = ggml_new_tensor_4d(ctx0, GGML_TYPE_F32, 1, nh, 1, 1);
+    ggml_tensor * op = ggml_flash_attn_ext_banded(ctx0, pq, pk, pv, pm, pr, 1.0f, 1);
+    ggml_flash_attn_ext_add_sinks(op, ggml_new_tensor_3d(ctx0, GGML_TYPE_F32, nh, 1, 1));
+    ggml_prec_set_acc(op, GGML_PREC_F32);
+    const bool ok = ggml_backend_dev_supports_op(dev, op);
+    banded_dev_ok.push_back({ { swa, dev }, ok });
+    return ok;
+}
+
 ggml_tensor * llama_model_inkling2::graph::build_inputs() {
     inp  = build_inp_mem_hybrid_iswa_rel(hparams.n_relative_extent, hparams.n_swa);
     attn = inp->get_attn();
     recr = inp->get_recr();
+
+    // LLAMA_INKLING_BANDED_ATTN=1 enables the banded kernel, off by default: slower than the dense bias on gfx906
+    static const bool banded_attn = [] {
+        const char * env = getenv("LLAMA_INKLING_BANDED_ATTN");
+        return env != nullptr && atoi(env) != 0;
+    }();
+
+    // banded FA needs a position-contiguous cache; small ubatches stay dense for graph reuse
+    inp->banded = banded_attn && cparams.flash_attn && n_tokens > n_tokens_banded_min;
+    for (int i = 0; i < 2 && inp->banded; ++i) {
+        inp->n_kv_banded[i] = (i ? attn->mctx->get_swa() : attn->mctx->get_base())->get_n_kv_pos_contiguous();
+    }
 
     ggml_tensor * inp_pos = build_inp_pos();
     inp_out_ids = build_inp_out_ids();
@@ -405,23 +455,77 @@ ggml_tensor * llama_model_inkling2::graph::build_layer(int il, int ip, ggml_tens
 
         ggml_tensor * sinks = build_lora_mm(layer.attn_sink_proj, inputs[0]);
 
-        // project r on the bias table first, then gather by distance: only the gathered bias is n_kv x n_tokens x n_head
-        ggml_tensor * table = ggml_mul_mat(ctx0, ggml_pad(ctx0, layer.attn_rel_bias, 0, 1, 0, 0), Rcur);
+        if (use_banded(il, is_swa)) {
+            const auto * cache = is_swa ? attn->mctx->get_swa() : attn->mctx->get_base();
+            auto * k_rot = is_swa ? attn->self_k_rot_swa[il] : attn->self_k_rot[il];
+            auto * v_rot = is_swa ? attn->self_v_rot_swa[il] : attn->self_v_rot[il];
+            if (k_rot) {
+                Qcur = llama_mul_mat_hadamard(ctx0, Qcur, k_rot);
+                Kcur = llama_mul_mat_hadamard(ctx0, Kcur, k_rot);
+            }
+            if (v_rot) {
+                Vcur = llama_mul_mat_hadamard(ctx0, Vcur, v_rot);
+            }
+            ggml_build_forward_expand(gf, Qcur);
+            ggml_build_forward_expand(gf, Kcur);
+            ggml_build_forward_expand(gf, Vcur);
+            build_cpy_k(cache, Kcur, is_swa ? attn->get_k_idxs_swa() : attn->get_k_idxs(), il);
+            build_cpy_v(cache, Vcur, is_swa ? attn->get_v_idxs_swa() : attn->get_v_idxs(), il);
 
-        // the sink logit t is per query: exp(s - t)/(1 + sum(exp(s - t))) = exp(s)/(exp(t) + sum(exp(s))), with a zero sink
-        table = ggml_sub(ctx0, table, ggml_reshape_3d(ctx0, sinks, 1, n_head, n_tokens));
-        table = ggml_cont(ctx0, ggml_permute(ctx0, table, 1, 0, 2, 3));
+            const int64_t n_kv_b = inp->n_kv_banded[is_swa];
+            ggml_tensor * k_all = build_get_k(cache, il);
+            ggml_tensor * v_all = build_get_v(cache, il);
+            GGML_ASSERT(n_kv_b <= k_all->ne[2]);
+            ggml_tensor * q_fa = ggml_permute(ctx0, ggml_reshape_4d(ctx0, Qcur, n_embd_head, n_head, n_tokens, 1), 0, 2, 1, 3);
+            ggml_tensor * k_fa = ggml_permute(ctx0, ggml_view_4d(ctx0, k_all, k_all->ne[0], k_all->ne[1], n_kv_b, k_all->ne[3],
+                    k_all->nb[1], k_all->nb[2], k_all->nb[3], 0), 0, 2, 1, 3);
+            ggml_tensor * v_fa;
+            if (v_all->nb[1] > v_all->nb[2]) { // transposed V
+                v_fa = ggml_view_4d(ctx0, v_all, n_kv_b, v_all->ne[1], v_all->ne[2], v_all->ne[3],
+                        v_all->nb[1], v_all->nb[2], v_all->nb[3], 0);
+                v_fa = ggml_transpose(ctx0, ggml_permute(ctx0, v_fa, 0, 2, 1, 3));
+            } else {
+                v_fa = ggml_permute(ctx0, ggml_view_4d(ctx0, v_all, v_all->ne[0], v_all->ne[1], n_kv_b, v_all->ne[3],
+                        v_all->nb[1], v_all->nb[2], v_all->nb[3], 0), 0, 2, 1, 3);
+            }
+            ggml_tensor * mask = is_swa ? attn->self_attn_mask_swa.raw : attn->self_attn_mask.raw;
+            // one banded mask per graph and cache: each layer's own view would be a separate scheduler input copy
+            ggml_tensor *& m = mask_banded[is_swa];
+            if (!m) {
+                m = ggml_cont(ctx0, ggml_view_4d(ctx0, mask, n_kv_b, mask->ne[1], mask->ne[2], mask->ne[3],
+                        mask->nb[1], mask->nb[2], mask->nb[3], 0));
+            }
+            // exp(s + b)/(exp(t) + sum(exp(s + b))): the dense mask b - t with a zero sink
+            ggml_tensor * rel_b = ggml_mul_mat(ctx0, layer.attn_rel_bias, Rcur);
+            rel_b = ggml_reshape_4d(ctx0, rel_b, rel_b->ne[0], n_head, n_tokens, 1);
+            cur = ggml_flash_attn_ext_banded(ctx0, q_fa, k_fa, v_fa, m, rel_b, 1.0f/sqrtf(n_embd_head), rel_b->ne[0]);
+            ggml_flash_attn_ext_add_sinks(cur, ggml_reshape_3d(ctx0, sinks, n_head, n_tokens, 1));
+            ggml_prec_set_acc(cur, GGML_PREC_F32);
+            res->add_fused_node({LLM_FUSED_OP_FLASH_ATTN, cur, il});
+            cur = ggml_reshape_2d(ctx0, cur, cur->ne[0]*cur->ne[1], cur->ne[2]*cur->ne[3]);
+            cb(cur, "kqv_out", il);
+            if (v_rot) {
+                cur = llama_mul_mat_hadamard(ctx0, cur, v_rot);
+            }
+        } else {
+            // project r on the bias table first, then gather by distance: only the gathered bias is n_kv x n_tokens x n_head
+            ggml_tensor * table = ggml_mul_mat(ctx0, ggml_pad(ctx0, layer.attn_rel_bias, 0, 1, 0, 0), Rcur);
 
-        ggml_tensor * kq_b = ggml_get_rows(ctx0, table, rel_pos);
-        kq_b = ggml_reshape_4d(ctx0, kq_b, n_head, n_kv, n_tokens/n_stream, n_stream);
-        kq_b = ggml_cont(ctx0, ggml_permute(ctx0, kq_b, 2, 0, 1, 3));
-        cb(kq_b, "kq_b", il);
+            // the sink logit t is per query: exp(s - t)/(1 + sum(exp(s - t))) = exp(s)/(exp(t) + sum(exp(s))), with a zero sink
+            table = ggml_sub(ctx0, table, ggml_reshape_3d(ctx0, sinks, 1, n_head, n_tokens));
+            table = ggml_cont(ctx0, ggml_permute(ctx0, table, 1, 0, 2, 3));
 
-        sinks = ggml_fill(ctx0, ggml_new_tensor_1d(ctx0, GGML_TYPE_F32, n_head), 0.0f);
+            ggml_tensor * kq_b = ggml_get_rows(ctx0, table, rel_pos);
+            kq_b = ggml_reshape_4d(ctx0, kq_b, n_head, n_kv, n_tokens/n_stream, n_stream);
+            kq_b = ggml_cont(ctx0, ggml_permute(ctx0, kq_b, 2, 0, 1, 3));
+            cb(kq_b, "kq_b", il);
 
-        cur = build_attn(inp,
-                nullptr, nullptr, nullptr,
-                Qcur, Kcur, Vcur, kq_b, sinks, 1.0f/sqrtf(n_embd_head), il);
+            sinks = ggml_fill(ctx0, ggml_new_tensor_1d(ctx0, GGML_TYPE_F32, n_head), 0.0f);
+
+            cur = build_attn(inp,
+                    nullptr, nullptr, nullptr,
+                    Qcur, Kcur, Vcur, kq_b, sinks, 1.0f/sqrtf(n_embd_head), il);
+        }
 
         cur = ggml_mul(ctx0, cur, ggml_sigmoid(ctx0, build_lora_mm(layer.wqkv_gate, inputs[0])));
         cur = convolve(build_lora_mm(layer.wo, cur), layer.attn_post_conv, nullptr, state, history, recr, 2*n_embd_k_gqa);
