@@ -277,6 +277,39 @@ With 10 uniform picks, the busier GPU averages 6.23 whole experts against today'
 
 Newest first. Full commands, identities and raw data are in the linked [old-ignore](old-ignore/README.md) folders.
 
+### 2026-11-21 Inkling 2 Mini: crash fix, fused ops, NVFP4 baseline
+
+In plain words: Inkling 2 Mini no longer crashes on images, runs about 37% faster on prompts and 19% faster on generation, and now has an exact NVFP4 file. 27B and Flash Next did not change. Code: upstream `e6d624b9a` merged (`4c5738580`), crash fix `ddca7dd9b`, fused ops `3253927e4`, `b6c927fd1`, `f17889023`, `85bb8a0f7`. Old build `build-u1sort-20261121` (`400989a0d`), new build `build-sconvfuse-20261121` (`85bb8a0f7`). `llama-bench -r 2`, order old, new, new, old, start temperature below 60C; raw data in `build-sconvfuse-20261121/validation/final/`, script [final_validation.sh](investigation-notes/2026-11-21-inkling2-mini/final_validation.sh).
+
+| Model | Config | PP2048 old | PP2048 new | TG128 old | TG128 new |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 27B Q8_0 | 2 GPUs, `-sm tensor`, ub 512 | 614.4 | 611.0 (-0.6%) | 37.09 | 37.24 (+0.4%) |
+| Flash Next UD-IQ3_XXS | 2 GPUs, `-sm tensor`, ub 512 | 658.2 | 655.9 (-0.3%) | 50.02 | 50.48 (+0.9%) |
+| Inkling 2 Mini IQ4_NL | ROCm0, ub 512 | 564.2 | 775.1 (+37.4%) | 36.42 | 43.35 (+19.0%) |
+| Inkling 2 Mini Q8_0 | ROCm0, ub 512 (1 run each) | 564.3 | 772.7 (+36.9%) | 34.30 | 40.33 (+17.6%) |
+| Inkling 2 Mini NVFP4 + Q8_0 | ROCm0, ub 512 | 490.8 (a) | 641.0 (+30.6%) | 30.5 (a) | 35.43 (+16.2%) |
+
+(a) The old build cannot run NVFP4 (it lacks #32669 / #32704); this column is `build-catchup-20261121-e6d6` (merge only, no fused ops), measured earlier the same evening, not alternated with the new runs. PP2048 at `-ub 2048` on the new build: IQ4_NL 774.2 (was 578.1), NVFP4 662.1 (was 509.7 on the merge-only build).
+
+Per fused op, Inkling 2 Mini IQ4_NL on ROCm0, same binary with the kill switch off / on (mean of 2, order off, on, on, off):
+
+| Op | Replaces | PP2048 | TG128 |
+| --- | --- | ---: | ---: |
+| `CLIP_ROWS` | 9-kernel q/k/r norm clip, 3 per layer | 565.3 / 567.6 | 36.07 / 39.15 (+8.5%) |
+| `RES_MIX` | concat chain, rms norm, two matmuls, softmax of the block residual mix | 568.8 / 751.6 (+32%) | 39.54 / 40.45 (+2.3%) |
+| `LOOP_GATE` + `RMS_NORM_CAT` | elementwise parts of the loop controllers (12 kernels to 5) | 754.5 / 772.9 (+2.4%) | 40.47 / 41.43 (+2.4%) |
+| `SCONV_RES` | conv, dynamic taps, residual and scale of the short convolutions | 774.0 / 777.7 | 41.56 / 43.26 (+4.1%) |
+
+Greedy text with a switch on and off matches for 35-48 tokens, then can differ by a word (float summation order). `test-backend-ops` on ROCm0: MUL_MAT 2727/2727, MUL_MAT_ID 1152/1152, CLIP_ROWS 9/9, RES_MIX 9/9, LOOP_GATE 3/3, RMS_NORM_CAT 6/6, SCONV_RES 12/12.
+
+Tried, this approach did not work: one kernel for the whole loop controller with its three matmuls, one thread block per token. TG128 40.5 to 11.7 t/s, PP unchanged. A single block cannot stream the controller weights. Untried: two kernels (a block per gate value, a block per output slice). [Patch and notes](old-ignore/2026-11-21/loop-ctrl-fused/README.md).
+
+NVFP4 file (`$MODELS_DIR/inkling2-mini/Inkling-2-Mini-NVFP4-Q8_0.gguf`, 17.57 GB, 18.8 GB VRAM at `-c 4096`): made with `llama-quantize --allow-requantize --tensor-type 'blk\.([0-9]|1[0-9])\.ffn_(gate_up|down)_exps=nvfp4' <Q8_K_XL.gguf_file> <out> Q8_0`. Coherent greedy text. It is 17% (PP) and 18% (TG) behind IQ4_NL / 12% behind Q8_0 on TG, all from the generic NVFP4 expert kernels (rocprof, merge-only build, NVFP4 vs Q8_0: `mul_mat_vec_q<NVFP4>` 8.1 vs 4.6 ms per token; `mul_mat_q<NVFP4>` 2.87 vs 1.72 s per 2048-token prompt; data in `build-catchup-20261121-e6d6/validation/inkling2-mini/nvfp4-speed/`). The 144 BF16 loop controller tensors do not matter (F32 copy: PP 488.5 vs 490.9, TG 30.5 vs 30.65).
+
+NVFP4 server and multi-user, new build, ROCm0: `llama-server` with mmproj Q8_0, `-c 16384`: text 30.4 t/s TG (bench 35.4, so about 4.7 ms per token of server overhead is still unexplained), image request (2750 prompt tokens) PP 389.5, TG 28.5, server stays up. `llama-batched-bench -npp 4096 -npl 1,2,4 -ub 2048`: PP 551 / 475 / 414, aggregate TG 29.7 / 43.7 / 68.6 (IQ4_NL on the old build: PP 507 / 429 / 378, TG 30.6 / 44.7 / 79.2).
+
+Image crash: fork bug, `s_copy_main` / `s_write` not filled for the Inkling input class; see the [handoff](handoff-2026-11-21.md). Check: `llama-completion --device none -ngl 0 -n 6` on the IQ4_NL file ends without the `get_rows` assert.
+
 ### 2026-11-21 catch-up to official 46eb1742d
 
 Merge `296a9e2c0` plus build fixes, then cleanup (peer AllReduce archived, about 30 sweep-only env knobs removed) and unsloth #264 (device MoE id counting sort). Builds: `build-merge-20261121` (merge only), `build-cleanup-20261121` (`698f466dd`), `build-u1sort-20261121` (`400989a0d` code, now `build-current`), each against `build-catchup-20261118-134459`. Cooled below 60C, order base/new/new/base, llama-bench r3. Raw data: each build's `validation/`.
