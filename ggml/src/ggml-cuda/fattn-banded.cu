@@ -1177,6 +1177,26 @@ static void fattn_banded_mma_launch(ggml_backend_cuda_context & ctx, ggml_tensor
     }
 }
 
+void ggml_cuda_flash_attn_ext_tile(ggml_backend_cuda_context & ctx, ggml_tensor * dst);
+
+// the tile kernel reads rel and the per-query sinks directly: F16 K/V, contiguous F32 rel, no kv_rows
+static bool fattn_banded_tile_usable(const ggml_tensor * dst) {
+    const ggml_tensor * q     = dst->src[0];
+    const ggml_tensor * k     = dst->src[1];
+    const ggml_tensor * v     = dst->src[2];
+    const ggml_tensor * m     = dst->src[3];
+    const ggml_tensor * sinks = dst->src[4];
+    const ggml_tensor * rel   = dst->src[6];
+
+    return q->ne[1] >= 32 && q->ne[3] == 1 && !dst->src[5] &&
+        k->type == GGML_TYPE_F16 && v->type == GGML_TYPE_F16 && k->nb[0] == sizeof(half) && v->nb[0] == sizeof(half) &&
+        k->nb[1] % 4 == 0 && v->nb[1] % 4 == 0 &&
+        rel->type == GGML_TYPE_F32 && ggml_is_contiguous(rel) && rel->ne[3] == 1 && rel->ne[0] <= (1 << 20) &&
+        (!sinks || (sinks->ne[1] == q->ne[1] && sinks->ne[2] == 1 && sinks->nb[0] == sizeof(float) &&
+                    sinks->nb[1] == sinks->ne[0]*sizeof(float))) &&
+        (!m || (m->ne[0] >= k->ne[1] && m->ne[1] >= q->ne[1]));
+}
+
 void ggml_cuda_flash_attn_ext_banded(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
     GGML_ASSERT(ggml_cuda_flash_attn_ext_banded_supported(ctx.device, dst));
 
@@ -1194,6 +1214,11 @@ void ggml_cuda_flash_attn_ext_banded(ggml_backend_cuda_context & ctx, ggml_tenso
 
     if (sinks && fattn_banded_mma_usable(ctx.device, dst)) {
         fattn_banded_mma_launch(ctx, dst, scale, rel_extent);
+        return;
+    }
+
+    if (fattn_banded_tile_usable(dst)) {
+        ggml_cuda_flash_attn_ext_tile(ctx, dst);
         return;
     }
 
