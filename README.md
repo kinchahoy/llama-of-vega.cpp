@@ -1,8 +1,7 @@
 # llama-of-vega.cpp
 
-_Human-drafted_
-
 ## A quick overview
+_Human-drafted_
 
 Agent optimized llama.cpp (and Unsloth llama.cpp) fork with many optimizations focused on a relatively narrow set of frontier open models that can run on 2x32GB. 
 It's hyper optimized for a pair of MI60 and MI50 Radeon datacenter cards with incredibly fast memory (HBM2) but fairly dated compute (no tensor cores etc.). I use this stack regularly and it's surprisingly power and cost effective for local inferencing.
@@ -15,9 +14,8 @@ A few notes:
 
 I've pulled a lot of optimization ideas from many gfx906 focused repos (I've tried to have agents attribute the sources below). The few original ideas here (if any) are around setting the focus and encouraging agents to rebalance compute onto the faster card and leverage the slower card for its equally fast memory
 
-_AI-drafted_
-
 ## Agent overview
+_AI-drafted_
 
 **Status datestamp: 2026-11-22** | Upstream base: [`ggml-org/llama.cpp` `e6d624b9a` (`b12623`)](https://github.com/ggml-org/llama.cpp/commit/e6d624b9a)
 
