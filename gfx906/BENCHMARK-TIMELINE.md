@@ -57,7 +57,7 @@ Verdict: one sentence, with grade. Not covered: what was not run.
 
 ---
 
-## Section 1: Chronological Progression Summary (2026-08-12 -> 2026-11-22)
+## Section 1: Chronological Progression Summary (2026-08-12 -> 2026-11-23)
 
 ### 1.1 Master Landed Wins Index (W01-W37 and Config/Check Milestones K1x-K7x)
 
@@ -187,6 +187,7 @@ Config / Check / Aggregate rows (Type K from `history-retro.md`):
 | 2026-11-21 | `0ba4be7f1` (`build-inkling-final`) | W35: NVFP4 repacked experts | ub 512 ABBA (A): NVFP4 / IQ4_NL / Q8_0 | 836.3 / 878.6 / 880.1 | 45.80 / 47.75 / 44.41 | NVFP4 +70.4% PP, +50.2% TG vs merge-only; 4,128 launches/tok |
 | 2026-11-22 | `efb85a1a5` + `ae32e5e58` (`build-final-20261122`) | W36: `flash_attn_ext_vec` `(128,4)` + W37: two-launch `res_mix` | ROCm0 ub 512: NVFP4 / IQ4_NL; NVFP4 @4K & @16K ctx | 835.7 (NVFP4) / 878.6 (IQ4_NL) | 46.97 (+2.2% NVFP4) / 48.98 (+2.5% IQ4_NL); @4K 38.19 -> 43.12 (+12.9%); @16K 33.50 -> 40.53 (+21%) | Fixed long-ctx attention occupancy |
 | 2026-11-22 | `3a8d768df` (`build-dspark-20261122`) | Opt-in DSpark drafting (`#32218` port) | `llama-server` NVFP4 ROCm0 greedy 200 tok (short / 3255-tok) | 838.2 (bench plain) | Plain 46.9 (bench); server off->on: 37.65->33.65 (short), 36.55->37.50 (3255-tok) | Opt-in; step ~2.1-2.2 plain tok |
+| 2026-11-23 | `be6e06d85` (`build-g1-20261122`) | DSpark `--spec-draft-n-max 2` sweep | `llama-server` NVFP4 ROCm0, 5 prompts x 256 tok, ABBA | 580 (with draft) / 710 (off) | greedy off->n2 37.07->47.82 (+29%); temp 1.0 35.27->38.14 (+8%); n3 44.53 | `[inkling]` preset default |
 
 #### D. Gemma 4 31B-it Q8_0 and Muse-Glimmer-30B Q8_0
 
@@ -202,7 +203,31 @@ Config / Check / Aggregate rows (Type K from `history-retro.md`):
 
 ---
 
-## Section 2: Detailed Dated Records (Newest First, 2026-11-22 -> 2026-08-12)
+## Section 2: Detailed Dated Records (Newest First, 2026-11-23 -> 2026-08-12)
+
+### 2026-11-23 Inkling 2 DSpark draft length and `[inkling]` server preset
+
+Find the DSpark draft length that pays on gfx906 and size a single-GPU server preset. Kind: A/B experiment + regression screen.
+
+- Source: `build-current` = `build-g1-20261122` (`be6e06d85`); no code change.
+- Model: Inkling 2 Mini NVFP4+Q8_0 (`Inkling-2-Mini-NVFP4-Q8_0.gguf`); draft `unsloth/Inkling-2-Mini-GGUF` `dspark-Inkling-2-Mini-Q8_0.gguf` (snapshot `45fd0876`).
+- Settings: `llama-server` ROCm0, `-fa on -b 2048 -ub 512 -c 16384 -np 1`, F16 KV, `-ngld 99 --spec-type draft-dspark`. Workload: `spec_accept.sh` prompt set (5 prompts, 256 tokens), each run started below 45 C. Greedy order off/n2/n3/n3/n2/off; temp 1.0 (top-k 0, top-p 1, min-p 0, Unsloth guide) order off/n2/n2/off.
+- Predicted: Unsloth guide says n-max 2 is fastest (third token rarely accepted). Earlier entry (n-max 3, one short prose prompt) found DSpark slower than plain.
+
+| Sampling | Mode | Mean TG t/s (runs) | Accept | ms/step | p4 prose TG |
+| --- | --- | ---: | ---: | ---: | ---: |
+| greedy | off | 37.07 (37.29, 36.85) | - | 26.9 | 37.5 |
+| greedy | n-max 2 | **47.82** (47.72, 47.92) | 0.732 | 50.4 | 34.4 |
+| greedy | n-max 3 | 44.53 (44.33, 44.72) | 0.658 | 64.9 | 26.8 |
+| temp 1.0 | off | 35.27 (35.34, 35.19) | - | 28.3 | 35.7 |
+| temp 1.0 | n-max 2 | **38.14** (38.23, 38.04) | 0.517 | 52.6 | 32.0 |
+
+- Measured: n-max 2 is +29% greedy and +8% at temp 1.0 (A). Code prompts gain up to +34% (p5); prose (acc 0.3) loses ~10%. Prompt speed drops ~710 -> ~580 t/s with the draft loaded (draft prefill).
+- Side finding: temp 1.0 without a draft costs 1.5 ms/token over greedy (28.3 vs 26.9 ms/step), likely CPU sampling over the 201K vocab.
+- Preset check (`[inkling]` in `gfx906/server/models.ini`, `-np 4 -kvu -c 262144`, DSpark n-max 2): idle after load ROCm0 28.5 of 32.8 GB used. One 157,628-token prompt: PP 284 t/s (555 s), TG 23.7 t/s, accept 0.74, peak 29.5 GB. Router smoke test via `"model": "inkling"`: reasoning then correct answer, 38.4 t/s.
+- Prediction error and card update: n-max 2 > 3 as predicted; the earlier "slower than plain" result came from n-max 3 on prose. None.
+
+Verdict: DSpark n-max 2 is a gain (A); now the `[inkling]` preset default. Not covered: multi-user DSpark, IQ4_NL with DSpark, lossless greedy check on this build (done on `build-dspark-20261122`).
 
 ### 2026-11-22 G1 padded GQA head groups in the tile FA kernel (27B 6:1)
 
