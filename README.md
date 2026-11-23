@@ -121,6 +121,7 @@ cmake --build build-gfx906 --target llama-cli llama-server llama-bench llama-bat
 
 Detailed fork docs live under `gfx906/`:
 - [gfx906/README.md](gfx906/README.md) - quickstart, run commands, and directory index
+- [gfx906/27B-JOURNEY.md](gfx906/27B-JOURNEY.md) - explainer: how Qwen3.8-27B got fast on gfx906 (hardware, theory, kernels)
 - [gfx906/GOALS.md](gfx906/GOALS.md) - target workload, priorities, and accuracy posture
 - [gfx906/HARDWARE.md](gfx906/HARDWARE.md) - calibrated gfx906 constants (occupancy, streaming, cross-GPU exchange)
 - [gfx906/PERFORMANCE.md](gfx906/PERFORMANCE.md) - live baselines, audit findings, testing rules, and worklist

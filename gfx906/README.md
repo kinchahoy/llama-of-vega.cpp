@@ -42,6 +42,7 @@ Keep HIP graphs on and RCCL off on boards without direct P2P (default host-stage
 | Path | Purpose |
 | --- | --- |
 | [GOALS.md](GOALS.md) | **Read first**: fork goals, 50-100K+ 1-4 slot workload, priority hierarchy, accuracy & tradeoff guidelines |
+| [27B-JOURNEY.md](27B-JOURNEY.md) | Explainer for newcomers: how 27B Q8_0 got from upstream to current speed (hardware, roofline, TP, repacked kernels, attention, MTP, serving) |
 | [HARDWARE.md](HARDWARE.md) | Measured gfx906 constants (Q1 occupancy, Q2 streaming, Q3 DMA exchange), one-block rule, MI60/MI50 asymmetry, cross-GPU portability |
 | [PERFORMANCE.md](PERFORMANCE.md) | Live baselines, 2026-11-22 BA-4 audit & skeptical findings, method/testing rules, token breakdowns, prioritized worklist, 28 lost routes, retired claims |
 | [BENCHMARK-TIMELINE.md](BENCHMARK-TIMELINE.md) | Append-only chronological benchmark history and dated experiment records |
