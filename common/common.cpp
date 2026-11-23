@@ -1722,11 +1722,13 @@ struct llama_model_params common_model_params_to_llama(common_params & params) {
                   COMMON_SPECULATIVE_TYPE_DRAFT_DSPARK) != params.speculative.types.end();
     const bool tensor_mirror_output = spec_dspark;
 
-    // Target-side repacking changes the verification rounding enough to lower
-    // DSpark acceptance on gfx906. The draft already loads without extra buffer
-    // types, so keep the target unrepacked too.
+    // Repacking changes the verification rounding, which can lower DSpark acceptance.
+    // LLAMA_DSPARK_REPACK=1 repacks the target and the draft anyway (faster verify step).
     if (spec_dspark) {
-        mparams.use_extra_bufts = false;
+        const char * e = getenv("LLAMA_DSPARK_REPACK");
+        if (e == nullptr || atoi(e) == 0) {
+            mparams.use_extra_bufts = false;
+        }
     }
 
     auto mirror_override = std::find_if(params.kv_overrides.begin(), params.kv_overrides.end(), [](const auto & entry) {
