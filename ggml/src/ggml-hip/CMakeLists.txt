@@ -121,6 +121,13 @@ if (NOT GGML_CUDA_FA)
     add_compile_definitions(GGML_CUDA_NO_FA)
 endif()
 
+if (GGML_HIP_MAX_ILP)
+    # max-ilp helps the repacked kernels but slows the generic mmvq kernels
+    set(GGML_SOURCES_ROCM_ILP ${GGML_SOURCES_ROCM})
+    list(FILTER GGML_SOURCES_ROCM_ILP EXCLUDE REGEX "/mmvq\\.cu$")
+    set_source_files_properties(${GGML_SOURCES_ROCM_ILP} PROPERTIES COMPILE_OPTIONS "-mllvm;-amdgpu-sched-strategy=max-ilp")
+endif()
+
 if (CXX_IS_HIPCC)
     set_source_files_properties(${GGML_SOURCES_ROCM} PROPERTIES LANGUAGE CXX)
     if (WIN32 AND CMAKE_BUILD_TYPE STREQUAL "Debug")

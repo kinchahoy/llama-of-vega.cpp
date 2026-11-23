@@ -6,7 +6,7 @@ Read [GOALS.md](GOALS.md) for priorities and [HARDWARE.md](HARDWARE.md) for meas
 
 ## Build flags & build-retention policy
 
-Use the local TheRock ROCm environment with exact comparison flags (`max-ilp` and `-O3` are worth 2-3% on 27B):
+Use the local TheRock ROCm environment with exact comparison flags (`max-ilp` and `-O3` are worth 2-3% on 27B; `GGML_HIP_MAX_ILP=ON` by default applies `max-ilp` to all HIP files except `mmvq.cu`, where it costs ~8% on unrepacked Inkling, so do not pass it in `CMAKE_HIP_FLAGS`):
 
 ```bash
 # Optional: source your ROCm / TheRock environment if not on PATH
@@ -17,7 +17,6 @@ cmake -S . -B "$CAND" \
   -DLLAMA_OPENSSL=ON -DLLAMA_BUILD_GFX906_TESTS=ON \
   -DAMDGPU_TARGETS=gfx906 -DCMAKE_BUILD_TYPE=Release \
   -DHIP_COMPILER=clang -DCMAKE_PREFIX_PATH="$(rocm-sdk path --cmake)" \
-  -DCMAKE_HIP_FLAGS="-mllvm -amdgpu-sched-strategy=max-ilp" \
   -DCMAKE_CXX_FLAGS="-O3 -Wno-unused-command-line-argument"
 cmake --build "$CAND" --target llama-cli llama-completion llama-server llama-bench llama-batched-bench gfx906-test-tp gfx906-test-flashnext-moe -j 8
 ```
