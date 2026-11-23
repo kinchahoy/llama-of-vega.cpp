@@ -225,7 +225,9 @@ Fix the server vs bench gap on Inkling and check the DSpark verify kernels. Kind
 - Trap found: a build without `-mllvm -amdgpu-sched-strategy=max-ilp` and `-O3` lost 7% on 27B MTP2 (57.8-58.1) and 2.5% on FN, but gained on the unrepacked Inkling path: `llama-bench -nr 1` pp3 77.8 -> 88.7, tg64 35.9 -> 38.8; DSpark server 54.4-55.0 vs 49.3-50.0. Always build candidates with the full recipe.
 - Prediction error and card update: predicted 8-9 ms/step from "verify falls off the repacked path"; wrong premise (repack off by design), real repack gain 2.5-3 ms. IK8 predicted ~5.6 ms/token, measured 4.3 ms (26.7 -> 22.4 ms/step).
 
-Verdict: IK8 fixed, +20% Inkling plain server TG, neutral elsewhere (A). DSpark gain left on the table by global max-ilp (`IK-ILP`).
+Verdict: IK8 fixed, +20% Inkling plain server TG, neutral elsewhere (A).
+
+- Follow-up `IK-ILP` (`GGML_HIP_MAX_ILP`, max-ilp for every HIP file except `mmvq.cu`; build `build-ilp`; old = `build-merged`, order old/new/new/old, start < 35 C). Profile (`-nr 1 -p 3`): all large max-ilp losers are `mmvq.cu` (`mul_mat_vec_q<NVFP4>` +33.8 / +21.4 ms, `<Q8_0>` +22.0 ms, `mul_mat_vec_q_moe<NVFP4>` +9.2 ms); others within 0.5 ms (`res_mix_out` -3.0 ms). Inkling `-nr 1` pp3 77.8/77.9 -> 87.9/88.4, tg64 36.3/35.8 -> 39.6/40.0; Inkling repacked pp512/tg128 neutral (929.9/47.4, 930.2/47.1 vs 932.2/46.9, 925.6/47.5); DSpark server 48.92/48.55 -> 54.23/54.80 (+11%, acc 0.732); FN 57.92/57.39 -> 58.18/58.70; **27B MTP2 61.93/62.66 -> 61.52/61.50 (-1.3%)**. `test-backend-ops` MUL_MAT / MUL_MAT_ID pass.
 
 ### 2026-11-23 Inkling 2 DSpark draft length and `[inkling]` server preset
 
