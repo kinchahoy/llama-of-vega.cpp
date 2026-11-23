@@ -205,6 +205,28 @@ Config / Check / Aggregate rows (Type K from `history-retro.md`):
 
 ## Section 2: Detailed Dated Records (Newest First, 2026-11-23 -> 2026-08-12)
 
+### 2026-11-23 HIP graphs in the server (IK8) and DSpark verify routing
+
+Fix the server vs bench gap on Inkling and check the DSpark verify kernels. Kind: A/B experiment.
+
+- Source: `6943a1058` (graph fix) + `c84da4333` (`LLAMA_DSPARK_REPACK=1` opt-in) on `ccf698163`; build `build-merged` with the MAINTENANCE.md recipe. Baseline `build-current` (`build-g1-20261122`).
+- Cause: server warmup, first prefill and first decode change graph node properties 5 times in the first 5 checks; `n_prop_resets >= 4 && resets*10 > checks` then set `unstable_disabled` for good. `llama-bench` warms longer and never hits it. Fix: only count a change when the entry had a captured graph (`warmup_complete`). Plain server: HIP-graph kernels 0% -> 96%.
+- Settings: `spec_accept.py` 5 prompts x 256 greedy tokens; Inkling ROCm0 `-c 16384 -ub 512 -np 1`; DSpark with n-max 2 + backend sampling; 27B/FN via `spec_accept.sh q27|fn`. Order old/new/new/old (27B, FN; Inkling plain/DSpark old/new/new/old in a first round, then 2 more new runs), start < 45 C.
+
+| Workload | Old t/s | New t/s | Change |
+| --- | --- | --- | ---: |
+| Inkling plain | 37.46, 37.36 | 44.63, 45.41 | **+20%** |
+| Inkling DSpark | 49.66, 49.77 | 49.26, 49.96 | 0% |
+| 27B MTP2 | 60.76, 61.56 | 61.04, 62.24 | +1% |
+| Flash Next MTP3 | 57.27, 58.35 | 57.89, 58.45 | +0.5% |
+
+- Quality: greedy text byte-identical (3 prompts), KLD vs `build-current` 0.000000 (`-b 8 -ub 8`, 2 chunks), acceptance unchanged on all models.
+- DSpark verify routing: not a dispatch bug. `common.cpp` turns off repacking for `draft-dspark` (repacked rounding lowers acceptance). With `LLAMA_DSPARK_REPACK=1`: ms/step 46.7 -> 44.0, acceptance 0.732 -> 0.695, TG 51.6 -> 52.7 (noise). Repacked `mul_mat_vec_repacked_id1<NVFP4>` at 3 tokens: ~109 us/call vs generic 144-248 us.
+- Trap found: a build without `-mllvm -amdgpu-sched-strategy=max-ilp` and `-O3` lost 7% on 27B MTP2 (57.8-58.1) and 2.5% on FN, but gained on the unrepacked Inkling path: `llama-bench -nr 1` pp3 77.8 -> 88.7, tg64 35.9 -> 38.8; DSpark server 54.4-55.0 vs 49.3-50.0. Always build candidates with the full recipe.
+- Prediction error and card update: predicted 8-9 ms/step from "verify falls off the repacked path"; wrong premise (repack off by design), real repack gain 2.5-3 ms. IK8 predicted ~5.6 ms/token, measured 4.3 ms (26.7 -> 22.4 ms/step).
+
+Verdict: IK8 fixed, +20% Inkling plain server TG, neutral elsewhere (A). DSpark gain left on the table by global max-ilp (`IK-ILP`).
+
 ### 2026-11-23 Inkling 2 DSpark draft length and `[inkling]` server preset
 
 Find the DSpark draft length that pays on gfx906 and size a single-GPU server preset. Kind: A/B experiment + regression screen.
