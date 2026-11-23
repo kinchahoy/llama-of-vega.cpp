@@ -227,6 +227,12 @@ Find the DSpark draft length that pays on gfx906 and size a single-GPU server pr
 - Preset check (`[inkling]` in `gfx906/server/models.ini`, `-np 4 -kvu -c 262144`, DSpark n-max 2): idle after load ROCm0 28.5 of 32.8 GB used. One 157,628-token prompt: PP 284 t/s (555 s), TG 23.7 t/s, accept 0.74, peak 29.5 GB. Router smoke test via `"model": "inkling"`: reasoning then correct answer, 38.4 t/s.
 - Prediction error and card update: n-max 2 > 3 as predicted; the earlier "slower than plain" result came from n-max 3 on prose. None.
 
+- Backend sampling (`-bs --spec-draft-backend-sampling`), ABBA n2/bs/bs/n2: greedy 48.11 -> 49.50 (+3%), temp 1.0 37.93 -> 39.95 (+5%, acceptance 0.517 -> 0.562). Added to the preset.
+- Step trace (`rocprofv3 --kernel-trace`, code prompt p5, greedy, n-max 2, 100 steps, 2.59 tok/step; traced 62.7 ms/step, untraced 48.6). Per step, profiler cost (1.2 us/kernel) removed: target verify graph 4,432 kernels 35.7 ms; DSpark draft graph 107 kernels 4.6 ms; direct kernels + copies 2.2 ms; GPU idle 14.2 ms traced (~6 untraced), mostly around non-graphed `copyBuffer` syncs. `llama-bench` N-token forward: 1/2/3/4/8 tok = 21.5/25.9/30.3/34.4/50.5 ms.
+- Byte roofline (GGUF sizes, 891 GB/s): 1 token 3.95 GB = 4.4 ms (dense+loop 1.61, routed experts 1.85, LM head 0.49 GB); 3-token verify 22.5 of 128 experts touched, 7.3 GB = 8.2 ms; draft 0.39 GB.
+- Kernel cause: verify NVFP4 experts run generic `mul_mat_vec_q_moe<NVFP4>` (gate_up 248 us, down 144 us, grid y 24) = 17.2 ms/step at ~250-290 GB/s; plain decode uses `mul_mat_vec_rp<NVFP4>` (36.6 us, 88/token) = 3.2 ms/token at ~490 GB/s. Bytes grow 2.8x, time 5.4x.
+- `IK8` cause: plain server decode launched 0% of kernels from HIP graphs (4,237 direct launches/token); `llama-bench` tg32 93%; DSpark server verify 93%.
+
 Verdict: DSpark n-max 2 is a gain (A); now the `[inkling]` preset default. Not covered: multi-user DSpark, IQ4_NL with DSpark, lossless greedy check on this build (done on `build-dspark-20261122`).
 
 ### 2026-11-22 G1 padded GQA head groups in the tile FA kernel (27B 6:1)
