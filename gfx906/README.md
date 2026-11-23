@@ -45,7 +45,7 @@ Keep HIP graphs on and RCCL off on boards without direct P2P (default host-stage
 | [HARDWARE.md](HARDWARE.md) | Measured gfx906 constants (Q1 occupancy, Q2 streaming, Q3 DMA exchange), one-block rule, MI60/MI50 asymmetry, cross-GPU portability |
 | [PERFORMANCE.md](PERFORMANCE.md) | Live baselines, 2026-11-22 BA-4 audit & skeptical findings, method/testing rules, token breakdowns, prioritized worklist, 28 lost routes, retired claims |
 | [BENCHMARK-TIMELINE.md](BENCHMARK-TIMELINE.md) | Append-only chronological benchmark history and dated experiment records |
-| [MAINTENANCE.md](MAINTENANCE.md) | Fork feature/file inventory, 10-quant repack layout & invariants, **14 silent merge traps**, weekly upstream catch-up & validation, how to add a fused op |
+| [MAINTENANCE.md](MAINTENANCE.md) | Fork feature/file inventory, 10-quant repack layout & invariants, **15 silent merge traps**, weekly upstream catch-up & validation, how to add a fused op |
 | [server/serve.sh](server/serve.sh) | Router `llama-server` launcher (uses `build-current` and `models.ini`) |
 | [server/models.ini](server/models.ini) | Validated unified-KV multi-user presets for `qwen27b`, `qwen27b-dflash`, `flashnext`, `flashnext-long`, `gemma4` |
 | [scripts/kernel_budget.py](scripts/kernel_budget.py) | Anchor-segmented `rocprofv3` SQLite analyzer: exact steady counts, Q1 occupancy, spill/under-fill/MI50-skew flags |

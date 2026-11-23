@@ -39,6 +39,7 @@ cmake --build "$CAND" --target llama-cli llama-completion llama-server llama-ben
 | Small-M F32 GEMM (P4) | Split-K F32 GEMM on GCN for M<128, N>16 before rocBLAS fallback (dispatch guards still open; see [PERFORMANCE.md](PERFORMANCE.md)) | `ggml/src/ggml-cuda/ggml-cuda.cu` | `GGML_CUDA_SGEMM_F32=0` |
 | Inkling 2 banded attention | Port of unsloth #386 (`GGML_OP_FLASH_ATTN_EXT_BANDED`) + fast gfx906 tile path (`use_banded` in `fattn-tile.cuh`, 162 LOC, default on for prefill). **Cleanup note**: `fattn-banded.cu` is **1,306 LOC** of slow non-matrix-unit fallback that halves PP on gfx906; prune once tile path handles SWA ring-wrap | `ggml/src/ggml-cuda/fattn-tile.cuh`, `fattn-common.cuh`, `fattn-banded.cu`, `src/llama-kv-cache.cpp`, `src/models/inkling2.cpp` | `LLAMA_INKLING_BANDED_ATTN=0` |
 | Inkling 2 DSpark drafting | Port of ggml-org#32218 (`3a8d768df`, ~240+ LOC), opt-in; currently slower than plain until 4-tok verify & BF16 Markov head kernel work | `src/models/inkling2.cpp`, `common/speculative.cpp` | opt-in (`--spec-type`) |
+| GCN sparse tile FA (QSA gather) | Port of ggml-org#30370: `flash_attn_mask_to_sparse_indices` lists gathered by the tile kernel through the `kv_rows` row gather; FN QSA layers at >= ~8K ctx (+20% PP @ 32K) | `ggml/src/ggml-cuda/fattn-tile.cuh` (`use_sparse`), `fattn.cu` (`ggml_cuda_flash_attn_ext_tile_shall_use_sparse`) | `GGML_CUDA_SPARSE_FA=0` |
 | AMD `kv_rows` FA & decode occupancy | `use_kv_rows` template in `fattn-tile.cuh` for F16 K/V (+25% 27B 4x16K PP); `__launch_bounds__(128, 4)` on HIP `flash_attn_ext_vec` (`efb85a1a5`) | `ggml/src/ggml-cuda/fattn.cu`, `fattn-tile.cuh`, `fattn-vec.cuh` | `LLAMA_KV_ROWS_DISABLE=1` |
 | MoE id counting sort (unsloth #264) | Device counting sort for `n_tokens >= 512`, skips out-of-slice TP expert ids, emits `expert_bounds` | `ggml/src/ggml-cuda/mmid.cu` | `GGML_CUDA_MOE_COUNTING_SORT=0` |
 | Speculative replay, rollback & TP splits | MTP prompt replay + KV-only prefill, DFlash persistent taps + single-GPU drafter, plane-indexed multi-slot recurrent rollback, tied output head split, shared-expert split, host n-gram/PLE placement, deterministic wide-row `top-k.cu` | `common/speculative.cpp`, `src/llama-context.cpp`, `llama-graph.cpp`, `llama-memory-recurrent.cpp`, `ggml/src/ggml-cuda/top-k.cu` | default on |
@@ -88,9 +89,9 @@ Everything outside `ggml/src/ggml-cuda/q8_repack/` includes only `repack.cuh` (f
 | AMD `kv_rows` FA & MoE counting sort | `use_kv_rows` template (plain kernels keep VGPRs), `fattn.cu` F16 TILE, meta `src[5]`; counting sort skips out-of-slice ids & writes `expert_bounds` | `test-backend-ops -o FLASH_ATTN_EXT -o MUL_MAT_ID`, [scripts/bench_multiuser.sh](scripts/bench_multiuser.sh) |
 | Speculative replay & rollback | Draft repack, split KV, per-seq taps (ub 2048 can need 2049 tap rows), plane-indexed multi-slot delta-net rollback, sequential ubatch split on rollback | Targeted MTP/DFlash check & [scripts/spec_accept.sh](scripts/spec_accept.sh) |
 
-## The 14 silent merge traps
+## The 15 silent merge traps
 
-Every one of these merged or compiled cleanly on past upstream catch-ups but silently broke correctness or speed. Check all 14 on every merge:
+Every one of these merged or compiled cleanly on past upstream catch-ups but silently broke correctness or speed. Check all 15 on every merge:
 
 1. **Single MMQ MoE `J` selection**: MMQ MoE uses linear `tile_spec` from `mmid.cu` (upstream #31047). Kernel `J` MUST equal `J_best` from `ggml_cuda_mmq_get_J_best` (which also holds the gfx906 `J <= 64` cap). Never add a second `J` selection in `mul_mat_q_switch_J`.
 2. **Repack/grouped-MoE `expert_bounds` overload**: Repack and grouped MoE read per-expert `expert_bounds`, not `tile_spec`. Keep the `ggml_cuda_launch_mm_ids_helper` overload in `mmid.cu` that writes `expert_bounds`.
@@ -106,6 +107,7 @@ Every one of these merged or compiled cleanly on past upstream catch-ups but sil
 12. **`mm_ids_helper` `it_compact` reset**: Since upstream `b94959a64` (#32505), `mm_ids_helper` resets `it_compact` after each store dump. The final `expert_bounds` entry in `mmid.cu` MUST be `nex_prev + n_dumped`, NOT `it_compact` (auto-merge silently drops the last expert's rows).
 13. **`build_attn_iswa_impl` free function**: Upstream `8af68d486` (#32429) moved the iswa `build_attn` body into free function `build_attn_iswa_impl`. Fork replica-aware `build_cpy_k`/`build_get_k` calls auto-merge into it and MUST be qualified as `gctx.build_*`.
 14. **Out-of-slice MoE expert ids under `-sm tensor`**: Each TP GPU sees expert ids outside its expert slice. Any device MoE id sort or helper MUST skip out-of-range ids, never trap (broke ROCm1 on the first #264 port).
+15. **`supports_op` must accept empty tensors**: A ubatch without outputs gives the last layer 0 tokens. If `supports_op` rejects `ne == 0` (e.g. a `>= 1` shape guard), the scheduler moves the node to CPU and `-sm tensor` crashes in `ggml_backend_sched_copy_input` (null call). The backend skips empty nodes anyway (`ggml_cuda_is_view_or_noop`). Broke F2 `DSV4_HC_MIX` on 2026-11-22 (FN prefill >= 8K).
 
 ## Weekly upstream catch-up procedure
 
@@ -126,7 +128,7 @@ Every one of these merged or compiled cleanly on past upstream catch-ups but sil
    printf '%s\n' "$UPSTREAM_HEAD" > "$OUT/upstream-source.txt"
    git merge --no-commit --no-ff "$UPSTREAM_HEAD"
    ```
-   Resolve conflicts, run `git rerere`, and review auto-merged callers against all 14 silent merge traps above.
+   Resolve conflicts, run `git rerere`, and review auto-merged callers against all 15 silent merge traps above.
 
 ### One final validation pass
 

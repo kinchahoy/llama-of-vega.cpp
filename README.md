@@ -63,7 +63,7 @@ The context size is one pool shared by all slots. While one user prefills a long
 ### Known caveats (2026-11-22)
 
 - Tested primarily on **gfx906 (MI50 / MI60)** with TheRock ROCm (`-DGGML_HIP_RCCL=OFF`). Wave32/NVIDIA/RDNA guards are in place for `DSV4_HC_MIX`, and `SGEMM_F32` is gated to GCN, but non-gfx906 targets are not regularly benchmarked here.
-- **Open high-leverage gaps** tracked in [gfx906/PERFORMANCE.md](gfx906/PERFORMANCE.md): long-context QSA sparse gather (upstream PR #30370) & 6:1 GQA head grouping (`G1`) at 32K-100K, the `>8` token cliff for 4-slot + speculative verify (`MU1(b)`), Inkling PP4K+ SWA ring-wrap fallback & `flash_attn_tile<128,128,64>` register spill, and Q8-reference KLD check for `SGEMM_F32` (`P4`).
+- **Open high-leverage gaps** tracked in [gfx906/PERFORMANCE.md](gfx906/PERFORMANCE.md): 6:1 GQA head grouping (`G1`) at 32K-100K, the `>8` token cliff for 4-slot + speculative verify (`MU1(b)`), Inkling PP4K+ SWA ring-wrap fallback & `flash_attn_tile<128,128,64>` register spill, and Q8-reference KLD check for `SGEMM_F32` (`P4`).
 
 ## ROCm / TheRock toolchain setup (gfx906)
 

@@ -204,6 +204,21 @@ Config / Check / Aggregate rows (Type K from `history-retro.md`):
 
 ## Section 2: Detailed Dated Records (Newest First, 2026-11-22 -> 2026-08-12)
 
+### 2026-11-22 GCN sparse tile FA for Flash Next QSA (ggml-org#30370) + F2 empty-batch crash fix
+
+Gather only QSA-selected KV rows in the tile kernel instead of masking the full KV. Kind: A/B experiment.
+
+- Source: `0b360810b` (sparse FA) on `a02c2e7b8` (F2 fix); build `build-sparse-20261122`. Baseline `build-dspark-20261122`.
+- Model: Flash Next UD-IQ3_XXS (snapshot `766911a6`); standard Flash Next settings, `llama-bench -p 512 -n 64 -d 32768`, ABBA, start below 60 C.
+- Predicted: QSA FA ~23% of FN PP @ 32K, gather touches 2,051 of N cells -> +10-20% PP @ 32K (C).
+- Measured: PP512 @ 32K 474.0 / 472.5 (A) vs 581.2 / 555.0 (B) = **+20.1%**; TG64 @ 32K 41.32 / 41.19 vs 42.00 / 41.66 (noise). Kernel (test-backend-ops perf, 256/256 GQA 12, 32K, 1 query, 2,048 selected): 201 -> 108 us. Grade A.
+- Quality: 64/64 long-KV `FLASH_ATTN_EXT` and 12/12 `DSV4_HC_MIX` cases pass vs CPU. `llama-perplexity` 16K ctx 2 chunks: KLD sparse vs dense 0.0095 (top-1 97.8%, PPL ratio 1.0009); dense vs dense 0.000000; dense `-ub 256` vs 512 0.0111 (top-1 97.7%), so sparse is inside the MoE FP-order floor.
+- Regression: 27B PP2048 / TG128 613.9 / 37.76, 613.6 / 37.80 (A) vs 612.8 / 37.70, 613.3 / 38.02 (B); Inkling IQ4_NL 871.8 / 49.11 vs 877.5 / 48.78. Neutral.
+- Crash found on the way: `main` (`411af32b0`, F2 guard hardening) crashed FN `-sm tensor` prefill at >= 8K depth (null call in `ggml_backend_sched_copy_input`). The new `x->ne[2] >= 1` guard sent the 0-token last-layer `DSV4_HC_MIX` (ubatch without outputs) to CPU. Fixed in `a02c2e7b8`; merge trap 15 in MAINTENANCE.md.
+- Prediction error and card update: inside the predicted range; none.
+
+Verdict: sparse gather worked, +20% FN PP @ 32K, neutral elsewhere (A). Not covered: 64K-100K, MTP verify, server.
+
 ### 2026-11-22 qwen27b server preset: multi-user check and ROCm0 out-of-memory fix
 
 Check the `qwen27b` preset as users run it (`serve.sh` router) at 1-4 users and long context. Kind: regression screen.
