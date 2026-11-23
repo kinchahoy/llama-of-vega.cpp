@@ -45,7 +45,7 @@ What to expect from the `llama-server` presets in [gfx906/server/models.ini](gfx
 
 | Preset (`models.ini`) | Model & mode | 1 user, short prompt | 1 user, long context | 2-4 users at once | Measured |
 | --- | --- | ---: | ---: | --- | --- |
-| `qwen27b` | 27B Q8_0, MTP2, 262K pool / 4 slots | **56-61** | **37.6** @ 100K | 2 users ~39 each (~80 total); 4 users ~15 each (**~63 total**); 4 x 50K: fits, ~43 total once all generate, but prefills run one at a time and stall the others (last first token at 640 s) | 2026-11-22 |
+| `qwen27b` | 27B Q8_0, MTP2, 262K pool / 4 slots | **56-61** | **37.6** @ 100K | 2 users ~39 each (~80 total); 4 users ~23 each (**~98 total**); 4 x 50K: fits, but prefills run one at a time and stall the others | 2026-11-22 |
 | `qwen27b-dflash` | 27B Q8_0, DFlash5, 32K / 1 slot | ~69-71 | long prompts pay a draft replay first | - | 2026-11 |
 | `flashnext` | Flash Next UD-IQ3_XXS, MTP3, 90K pool / 2 slots | ~58-65 | ~63 @ 100K (MTP3 bench) | - | 2026-11 |
 | `flashnext-long` | Flash Next UD-IQ3_XXS, no draft, 131K pool / 4 slots | ~48 | ~29 @ 120K | 4 users ~41 total | 2026-11-11 |

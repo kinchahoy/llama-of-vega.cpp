@@ -70,7 +70,7 @@ Everything outside `ggml/src/ggml-cuda/q8_repack/` includes only `repack.cuh` (f
    - Multi-expert (`ne2 > 1`) concatenates per-expert layouts at stride `repack_gcn_nbytes(type, ne0, ne1)`. Weights are write-once (`get_tensor == nullptr`).
 2. **Four compute paths** (`repack-kernels.cuh`, `mul-mat.cu`, `mul-mat-id.cu`):
    - Single-token MMV (`ne11 == 1` / `n_tokens == 1`): `LANES=64` dense, `16` MoE plain, `32` MoE fused GLU (`<8,4,true,32,true>` avoids the 64-VGPR cap of 1024-thread blocks).
-   - Narrow dense MMV (`mul_mat_vec_repacked_nc`): `2 <= ne11 <= MMQ_RP_Q8_MMV_MAX_TOKENS` (currently **8**, dense only -- **key cliff for 2-4 slot verify; see `MU1(b)` in [PERFORMANCE.md](PERFORMANCE.md)**).
+   - Narrow dense MMV (`mul_mat_vec_repacked_nc`): `2 <= ne11 <= 2*MMQ_RP_Q8_MMV_MAX_TOKENS` (16, dense only); 9..16 tokens run as two balanced chunks of <= 8 (`GGML_CUDA_RP_NC_SPLIT=0` restores the cap of 8). MoE narrow MMV still stops at 8 (`MU1(b)` in [PERFORMANCE.md](PERFORMANCE.md)).
    - 32-wide GEMM (`w32`): `8 < ne11 < 128` dense or `n_assign < 2*BN*n_expert` MoE.
    - 64-wide GEMM (`w64`): `ne11 >= 128` dense or high-assignment MoE. Multi-token GEMM reads `quantize_mmq_q8_1_cuda` reinterpreted as `block_q8_1_mmq_h` (`float d4[4]`, pinned by 3 `static_assert`s).
 3. **Fused MMV guards**: Fires ONLY at 1 token when BOTH gate and up are repacked (`should_fire(src0) && should_fire(gate->src[0])`). MoE fused GLU covers no-bias `{MM_ID, MM_ID, GLU}` only; scale-fusion helpers in `ggml-cuda.cu` skip repacked weights.

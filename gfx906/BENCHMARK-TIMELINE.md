@@ -204,6 +204,20 @@ Config / Check / Aggregate rows (Type K from `history-retro.md`):
 
 ## Section 2: Detailed Dated Records (Newest First, 2026-11-22 -> 2026-08-12)
 
+### 2026-11-22 SP3 verify-width curve and dense 9..16 token split (MU1(b))
+
+Measure batch cost for 1..16 tokens, then stop dense repacked mat-vec from falling to the 32-wide tile above 8 tokens. Kind: A/B experiment.
+
+- Source: `ce504ae78` on `047f462f3`; build `build-ncsplit-20261122`. Baseline `build-sparse-20261122`.
+- SP3 (`llama-bench -p 1..16 -n 0 -r 5`, ub 512): 27B 30.2 (1) / 45.4 (8) / **93.6 (9)** / 95.5 (12) / 98.1 (16) ms per batch; FN 42.6 / 67.2 / **170.2** / 169.7 / 175.1 ms.
+- Change: 9..16 tokens run `mul_mat_vec_repacked_nc` on two balanced chunks (no new kernel instances).
+- Measured: 27B 62.8 (9) / 66.9 (12) / 78.8 (16) ms (-33 / -30 / -20%); FN 145.9 / 154.1 / 163.5 ms (MoE side unchanged). <= 8 tokens unchanged.
+- Serving (`serve.sh` qwen27b, 4 users x 1.5K, MTP2, ABBA x 2 seeds): total gen 76.4 / 76.3 / 75.8 / 74.1 (A) vs 99.9 / 95.4 / 99.2 / 99.0 (B) = **+30%**; per-user mean ~18.0 -> ~22.9. Accept 0.64-0.67 both. Grade A.
+- Quality: 27B `llama-perplexity -b 12 -ub 12` 8 x 512 vs `GGML_CUDA_RP_NC_SPLIT=0`: KLD 0.00042, top-1 98.97%, PPL ratio 1.0007.
+- Note: this baseline (75.7 total) is above the morning's 64.4; the morning run had ROCm0 out of memory (FA workspace capped) before the `no-mmproj-offload` fix.
+
+Verdict: worked, +30% 4-user MTP2 throughput on 27B (A). Not covered: FN MoE side, 2-3 users, long context.
+
 ### 2026-11-22 GCN sparse tile FA for Flash Next QSA (ggml-org#30370) + F2 empty-batch crash fix
 
 Gather only QSA-selected KV rows in the tile kernel instead of masking the full KV. Kind: A/B experiment.
