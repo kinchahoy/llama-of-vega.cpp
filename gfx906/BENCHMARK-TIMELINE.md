@@ -204,6 +204,20 @@ Config / Check / Aggregate rows (Type K from `history-retro.md`):
 
 ## Section 2: Detailed Dated Records (Newest First, 2026-11-22 -> 2026-08-12)
 
+### 2026-11-22 G1 padded GQA head groups in the tile FA kernel (27B 6:1)
+
+Read each K/V head once per decode step instead of 3x. Kind: A/B experiment (same build, env switch).
+
+- Build `build-g1-20261122` (branch `worktree-g1-gqa-grouping` on `9d2f966cb`). A = `GGML_CUDA_FA_GQA_PAD=0` (old `ncols2=2` path), B = default.
+- Change: tile kernel maps `blockIdx.z` to (sequence, K/V head, head tile) like the MMA kernel; padded Q heads are zero and not written. Dispatch pads GQA 3 -> 4 and 5..7 -> 8 for <= 8 tokens on AMD. No new kernel instances.
+- Tests: `test-backend-ops -o FLASH_ATTN_EXT` 4730/4730 on ROCm0, incl. 288 new GQA 3/5/6/7 cases (1..9 tokens, sinks on/off).
+- 27B TG128 (`llama-bench -d`, `-sm tensor`, ub 2048): 32K A 34.20 / 33.90 / 33.94 vs B 35.26 / 35.68 = **+5.1%** (B run at 59 C start gave 31.67, thermal outlier, excluded; cold pair started at 43-44 C); 64K A 28.14 vs B 29.88 = **+6.2%** (one pair).
+- 4x16K unified KV (`llama-batched-bench -npl 4`): PP 569.8 vs 571.9, 4-way TG 82.16 vs 84.98 (+3.4%, one pair).
+- Quality: `llama-perplexity -c 4096 --chunks 2 -b 8 -ub 8` (docs corpus) KLD 0.000506, same top 99.24%, PPL ratio 0.9997; A vs A control KLD 0.
+- Thermal note: under load junctions hit 100-101 C with the blower pinned at 96%; blackbox log shows sclk -15..18% at edge >= 78 C. Start-temperature control matters for every A/B.
+
+Verdict: worked, Grade B (few pairs). Smaller than the -1.7..2.0 ms @ 32K estimate; L2 hits already hid part of the 3x KV reads.
+
 ### 2026-11-22 SP3 verify-width curve and dense 9..16 token split (MU1(b))
 
 Measure batch cost for 1..16 tokens, then stop dense repacked mat-vec from falling to the 32-wide tile above 8 tokens. Kind: A/B experiment.
